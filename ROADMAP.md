@@ -54,8 +54,8 @@ Each phase is usable on its own. Order is by what blocks real work first.
 - [x] **Plan mode and goal** (`plan`, `goal`): a line over the composer
       for plan mode and one for the goal (phase, rounds, the /goal commands
       that apply), from the session's events, kept on resume.
-- [ ] **Deliverables** (`deliverables`): the files a turn changed, at its
-      end.
+- [x] **Deliverables** (`deliverables`): the files a turn changed, at its
+      end, from the mutation tools' successful calls.
 
 - [x] **MCP servers**: `/mcp` lists the servers the profile configures
       (`dsh-mcp-client` entries) and the tools each gave, or that it gave

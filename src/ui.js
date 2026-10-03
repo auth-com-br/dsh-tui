@@ -27,6 +27,7 @@ import { whenOf } from './sessions.js';
 import { menuQuery, menuRows, menuLines, pickRow, leadingName } from './slashmenu.js';
 import { activeAtToken, replaceToken, shownMentions } from './refs.js';
 import { NO_STANDING, foldStanding, standingLines } from './status.js';
+import { newDeliverables, foldDeliverables, deliverablesText } from './deliverables.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg } from './utils.js';
 
@@ -793,6 +794,8 @@ export function App({
   const [refs, setRefs] = useState({ key: undefined, rows: [] });
   // Plan mode and the goal, folded from the session's events (status.js).
   const [standing, setStanding] = useState(NO_STANDING);
+  // The files this turn changed, shown when it ends (deliverables.js).
+  const deliverables = useRef(newDeliverables());
   const viewportStep = useRef(5);
   const [, setTick] = useState(0); // drives the Working elapsed timer
   const usageRef = useRef(null);
@@ -809,6 +812,9 @@ export function App({
   const cols = stdout?.columns ?? 100;
   const rows = stdout?.rows ?? 30;
   const width = Math.max(20, cols - 2);
+  // For handlers that outlive a render (handleEvent is memoised).
+  const widthRef = useRef(width);
+  widthRef.current = width;
 
   // Working elapsed timer while busy.
   useEffect(() => {
@@ -1045,6 +1051,7 @@ export function App({
       }
       const data = event.data && typeof event.data === 'object' ? event.data : {};
       setStanding(s => foldStanding(s, event));
+      deliverables.current = foldDeliverables(deliverables.current, event);
       switch (event.type) {
         case 'user/message': {
           // Live, the user's own message is on screen already (send pushes
@@ -1113,9 +1120,15 @@ export function App({
             parts.push('/retry 重试');
           }
           const text = parts.join(' · ');
+          const changed = deliverablesText(
+            deliverables.current.produced,
+            process.cwd(),
+            widthRef.current,
+          );
           setItems(prev => {
             const divider = prev.length === 0 ? [] : [{ kind: 'divider' }];
-            return [...prev, ...divider, { kind: 'status', text, error: isError }];
+            const files = changed === undefined ? [] : [{ kind: 'status', text: changed }];
+            return [...prev, ...divider, ...files, { kind: 'status', text, error: isError }];
           });
           break;
         }
