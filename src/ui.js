@@ -31,6 +31,7 @@ import { newDeliverables, foldDeliverables, deliverablesText } from './deliverab
 import { jobsBadge, jobsText } from './jobs.js';
 import { foldWorkflow, workflowText } from './workflow.js';
 import { trajectoryText } from './trajectory.js';
+import { foldSchedule, scheduleText, reminderPrompt } from './schedule.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg } from './utils.js';
 
@@ -84,6 +85,7 @@ const TUI_COMMANDS = [
   { name: 'mcp', description: 'the MCP servers and their tools', kind: 'command' },
   { name: 'agents', description: "watch this session's subagents", kind: 'command' },
   { name: 'jobs', description: "this session's background jobs", kind: 'command' },
+  { name: 'schedule', description: "this session's reminders", kind: 'command' },
   {
     name: 'trajectory',
     description: 'the last turns with their steps, tools and timings',
@@ -111,6 +113,7 @@ const HELP_TEXT = [
   '  /mcp          the MCP servers and their tools',
   "  /agents       watch this session's subagents (read-only)",
   "  /jobs         this session's background jobs",
+  "  /schedule     this session's reminders (overlays/schedule.yml)",
   '  /trajectory [n]  the last n turns with steps, tools and timings',
   '  /rename <title>  rename this session',
   '  @path         refer to a file or folder; @ also lists other sessions',
@@ -829,6 +832,8 @@ export function App({
   // The files this turn changed, shown when it ends (deliverables.js).
   const deliverables = useRef(newDeliverables());
   const workflowRuns = useRef(new Map());
+  // The session's reminders, folded from its schedule/change events.
+  const [reminders, setReminders] = useState([]);
   // The session's background jobs, as the registry says they changed.
   const [jobs, setJobs] = useState([]);
   useEffect(() => {
@@ -1101,6 +1106,7 @@ export function App({
       const data = event.data && typeof event.data === 'object' ? event.data : {};
       setStanding(s => foldStanding(s, event));
       deliverables.current = foldDeliverables(deliverables.current, event);
+      setReminders(r => foldSchedule(r, event));
       // A workflow run is one block in the transcript, redrawn as its
       // members start and end.
       const run = foldWorkflow(workflowRuns.current, event);
@@ -1118,6 +1124,16 @@ export function App({
           // it); replaying a resumed session's past, it is drawn from the
           // log. Messages the harness writes (runtime context, reminders)
           // are not the user's and are left out.
+          // A reminder that came due (dsh-schedule) is a message the
+          // harness sends; it is shown, or the answer would come from
+          // nowhere.
+          if (data.source?.kind === 'plugin' && data.source.plugin === 'schedule') {
+            const text = (data.content ?? []).find(c => c.type === 'text')?.text;
+            pushItem({
+              kind: 'status',
+              text: `⏰ reminder${typeof text === 'string' ? `: ${reminderPrompt(text)}` : ''}`,
+            });
+          }
           if (replaying.current && data.source?.kind === 'user') {
             const text = (data.content ?? []).find(c => c.type === 'text')?.text;
             if (typeof text === 'string' && text.trim() !== '') {
@@ -1548,6 +1564,11 @@ export function App({
         });
         return;
       }
+      if (text === '/schedule') {
+        setInput('');
+        pushItem({ kind: 'status', text: scheduleText(reminders, Date.now()) });
+        return;
+      }
       if (text === '/jobs') {
         setInput('');
         pushItem({
@@ -1730,6 +1751,7 @@ export function App({
       openAgent,
       listJobs,
       sessionEvents,
+      reminders,
       listCommands,
       listModels,
       currentModel,
@@ -1968,6 +1990,9 @@ export function App({
   const hintRightParts = [];
   if (hint !== null) {
     hintRightParts.push(hint);
+  }
+  if (reminders.length > 0) {
+    hintRightParts.push(`⏰ ${reminders.length}`);
   }
   const badge = jobsBadge(jobs);
   if (badge !== '') {

@@ -1,0 +1,12 @@
+# Reminders, opt-in as they are in the web app (its Schedule overlay): the
+# model gets schedule_create, schedule_list and schedule_cancel, and a due
+# reminder comes back as a message in the same session once it is idle.
+# Nothing leaves the session — no e-mail, no notification.
+#
+# For one run:      dsh --profile tui --patch <path to this file>
+# For every run:    copy the insert below into ~/.dsh/cordis.patch.yml
+#
+# /schedule in the TUI lists the session's reminders.
+- insert:
+    - id: schedule
+      name: '@deepseek-ai/dsh-schedule'

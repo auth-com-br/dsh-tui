@@ -70,8 +70,9 @@ Each phase is usable on its own. Order is by what blocks real work first.
       comes back. Writing to a continuable one is still to do.
 - [x] **Jobs** (`jobs`): a footer count of the jobs running, and `/jobs`
       listing them; their output stays the agent's (a read would take it).
-- [ ] **Schedules** (`schedule`): the profile does not mount the schedule
-      service; reminders need it first.
+- [x] **Schedules** (`schedule`): opt-in as in the web app,
+      `overlays/schedule.yml`; `/schedule` lists the reminders, the footer
+      counts them, and a due one is shown before the answer to it.
 - [x] **Workflow runs** (`workflow-run`): a block per run that follows
       it live — its phases, each agent's status, how it ended.
 - [x] **Trajectory** (`trajectory`): `/trajectory [n]`, the last turns'

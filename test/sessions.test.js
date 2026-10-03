@@ -111,3 +111,10 @@ describe('a session worked through /goal', () => {
     assert.equal(s.title, 'ship it');
   });
 });
+
+describe('parseArgs and dsh options', () => {
+  test("dsh's own --patch and --profile, passed on, are not errors", () => {
+    assert.deepEqual(parseArgs(['-c', '--patch', '/x/schedule.yml']), { resume: true });
+    assert.deepEqual(parseArgs(['--patch=/x.yml', '--resume', 'abc']), { resume: 'abc' });
+  });
+});

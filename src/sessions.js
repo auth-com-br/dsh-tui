@@ -29,6 +29,13 @@ export function parseArgs(args) {
       } else {
         out.resume = true;
       }
+    } else if (a === '--patch' || a === '--profile') {
+      // dsh's own, with its value: dsh reads them, but one written after
+      // a TUI option (`dsh --profile tui -c --patch x.yml`) is passed on
+      // here too.
+      i++;
+    } else if (a.startsWith('--patch=') || a.startsWith('--profile=')) {
+      // dsh's own, as above.
     } else if (a.startsWith('--resume=')) {
       out.resume = a.slice('--resume='.length) || true;
     } else {

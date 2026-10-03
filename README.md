@@ -156,3 +156,10 @@ Issues and PRs are welcome. Good first tasks: upstream the two runtime patches (
 ## License
 
 [MIT](LICENSE). An independent community project, not affiliated with DeepSeek or TokenDance.
+
+## Reminders (opt-in)
+
+`overlays/schedule.yml` gives the model reminder tools (dsh-schedule), as the
+web app's Schedule overlay does: `dsh --profile tui --patch
+overlays/schedule.yml` for one run, or its insert copied into
+`~/.dsh/cordis.patch.yml` for every run. `/schedule` lists them.
