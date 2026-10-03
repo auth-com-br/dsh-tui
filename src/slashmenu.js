@@ -147,11 +147,22 @@ export function menuRows(catalog, query) {
 
 /**
  * What picking a row does: put `/name ` in the composer to be finished
- * (a skill, or a command that takes an argument), or run `/name`.
+ * (a skill, or a command that takes an argument), or run `/name`. A
+ * command typed whole runs as typed: its argument is optional or the
+ * command says what it wants, and enter on `/plan` completing it to
+ * `/plan ` asked for a second enter.
  * @param {MenuEntry} row
+ * @param {string} [typed] what follows the `/` in the composer
  * @returns {{insert: string} | {run: string}}
  */
-export function pickRow(row) {
+export function pickRow(row, typed) {
+  if (
+    row.kind === 'command' &&
+    typed !== undefined &&
+    typed.toLowerCase() === row.name.toLowerCase()
+  ) {
+    return { run: `/${row.name}` };
+  }
   if (row.kind === 'skill' || row.takesInput) {
     return { insert: `/${row.name} ` };
   }

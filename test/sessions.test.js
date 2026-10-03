@@ -95,3 +95,19 @@ describe('searchTextOf', () => {
     assert.match(text, /abacaxi/);
   });
 });
+
+describe('a session worked through /goal', () => {
+  test('is not empty: its goal rounds are what was asked', async () => {
+    const round = {
+      type: 'user/message',
+      data: { source: { kind: 'goal' }, content: [{ type: 'text', text: 'ship it' }] },
+    };
+    const persistence = {
+      list: async () => [{ id: 'g', cwd: '/w', createdAt: 1 }],
+      load: async () => ({ events: [round] }),
+    };
+    const [s] = await listSessions(persistence, '/w');
+    assert.equal(s?.id, 'g');
+    assert.equal(s.title, 'ship it');
+  });
+});

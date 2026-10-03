@@ -49,6 +49,18 @@ export const USAGE = [
 ].join('\n');
 
 /**
+ * A message somebody asked for: typed by the user, or a round of a goal
+ * the user set (dsh-goal sends those as source "goal"). A session worked
+ * only through /goal holds no message of the user's own, and was taken
+ * for an empty one — `-c` passed it over.
+ * @param {{type: string, data?: any}} e
+ */
+function asked(e) {
+  const kind = e.data?.source?.kind;
+  return e.type === 'user/message' && (kind === 'user' || kind === 'goal');
+}
+
+/**
  * A session's name: its title (the harness names sessions after their first
  * request, and a title model may rename them), else its first message.
  * @param {readonly {type: string, data?: any}[]} events
@@ -60,7 +72,7 @@ export function titleOf(events) {
     if (e.type === 'session/title' && typeof e.data?.title === 'string') {
       title = e.data.title;
     }
-    if (first === undefined && e.type === 'user/message' && e.data?.source?.kind === 'user') {
+    if (first === undefined && asked(e)) {
       const text = (e.data.content ?? []).find(c => c.type === 'text')?.text;
       if (typeof text === 'string' && text.trim() !== '') {
         first = text.trim().replace(/\s+/g, ' ');
@@ -78,7 +90,7 @@ export function titleOf(events) {
 export function searchTextOf(events) {
   let out = '';
   for (const e of events) {
-    if (e.type === 'user/message' && e.data?.source?.kind === 'user') {
+    if (asked(e)) {
       for (const c of e.data.content ?? []) {
         if (c.type === 'text' && typeof c.text === 'string') {
           out += ` ${c.text}`;
@@ -97,7 +109,7 @@ export function searchTextOf(events) {
  * @param {readonly {type: string, data?: any}[]} events
  */
 export function userMessages(events) {
-  return events.filter(e => e.type === 'user/message' && e.data?.source?.kind === 'user').length;
+  return events.filter(e => asked(e)).length;
 }
 
 /**

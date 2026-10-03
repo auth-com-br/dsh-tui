@@ -26,6 +26,7 @@ import { newQuestions, questionKey, questionLines, answersOf } from './questions
 import { whenOf } from './sessions.js';
 import { menuQuery, menuRows, menuLines, pickRow, leadingName } from './slashmenu.js';
 import { activeAtToken, replaceToken, shownMentions } from './refs.js';
+import { NO_STANDING, foldStanding, standingLines } from './status.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg } from './utils.js';
 
@@ -790,6 +791,8 @@ export function App({
   const [inputKey, setInputKey] = useState(0);
   // The `@` menu's rows and the token they were asked for.
   const [refs, setRefs] = useState({ key: undefined, rows: [] });
+  // Plan mode and the goal, folded from the session's events (status.js).
+  const [standing, setStanding] = useState(NO_STANDING);
   const viewportStep = useRef(5);
   const [, setTick] = useState(0); // drives the Working elapsed timer
   const usageRef = useRef(null);
@@ -955,7 +958,7 @@ export function App({
       pickRef(row, false);
       return;
     }
-    const pick = pickRow(row);
+    const pick = pickRow(row, query);
     if ('insert' in pick) {
       setInput(pick.insert);
       setInputKey(k => k + 1);
@@ -1041,6 +1044,7 @@ export function App({
         return;
       }
       const data = event.data && typeof event.data === 'object' ? event.data : {};
+      setStanding(s => foldStanding(s, event));
       switch (event.type) {
         case 'user/message': {
           // Live, the user's own message is on screen already (send pushes
@@ -1567,6 +1571,7 @@ export function App({
       : asks.length > 0
         ? questionLines(asks[0].state, width).length - 1
         : menuShown.length;
+  const standingShown = standingLines(standing, width);
 
   // ── Viewport: keep the transcript tail visible (bottom-anchored), with
   // line-based scrolling on top (scrollLines = lines offset from the bottom).
@@ -1578,7 +1583,7 @@ export function App({
     busy,
     todos,
     thinkingOpen,
-    composerExtra,
+    composerExtra: composerExtra + standingShown.length,
   });
   const { visible, scrollLines: clampedLines, atBottom, step, overflowTop } = viewport;
   useEffect(() => {
@@ -1806,6 +1811,21 @@ export function App({
     ),
     statusRow,
     scrollHint,
+    ...standingShown.map((line, i) =>
+      el(
+        Box,
+        { key: `standing${i}`, paddingLeft: 1, paddingRight: 1 },
+        el(
+          Text,
+          line.style === 'plan'
+            ? { color: 'yellow', bold: true }
+            : line.style === 'blocked'
+              ? { color: ERR }
+              : { color: ACCENT },
+          line.text,
+        ),
+      ),
+    ),
     inputRow,
     hintRow,
   );

@@ -87,6 +87,12 @@ describe('pickRow', () => {
     assert.deepEqual(pickRow(cmd('goal', { takesInput: true })), { insert: '/goal ' });
     assert.deepEqual(pickRow(skill('frontend-design')), { insert: '/frontend-design ' });
   });
+
+  test('a command typed whole runs on enter, even one taking an argument', () => {
+    assert.deepEqual(pickRow(cmd('plan', { takesInput: true }), 'plan'), { run: '/plan' });
+    assert.deepEqual(pickRow(cmd('plan', { takesInput: true }), 'pl'), { insert: '/plan ' });
+    assert.deepEqual(pickRow(skill('find-skills'), 'find-skills'), { insert: '/find-skills ' });
+  });
 });
 
 describe('menuLines', () => {

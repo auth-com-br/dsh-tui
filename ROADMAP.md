@@ -51,8 +51,9 @@ Each phase is usable on its own. Order is by what blocks real work first.
 - [x] **`@` references** (`reference`): files and sessions, completed as
       typed — a file is a path the model reads, a session is attached as a
       read-only snapshot by the harness.
-- [ ] **Plan mode and goal** (`plan`, `goal`): the plan chip, the session's
-      goal with edit/pause/resume/clear.
+- [x] **Plan mode and goal** (`plan`, `goal`): a line over the composer
+      for plan mode and one for the goal (phase, rounds, the /goal commands
+      that apply), from the session's events, kept on resume.
 - [ ] **Deliverables** (`deliverables`): the files a turn changed, at its
       end.
 
