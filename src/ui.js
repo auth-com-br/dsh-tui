@@ -28,6 +28,7 @@ import { menuQuery, menuRows, menuLines, pickRow, leadingName } from './slashmen
 import { activeAtToken, replaceToken, shownMentions } from './refs.js';
 import { NO_STANDING, foldStanding, standingLines } from './status.js';
 import { newDeliverables, foldDeliverables, deliverablesText } from './deliverables.js';
+import { jobsBadge, jobsText } from './jobs.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg } from './utils.js';
 
@@ -80,6 +81,7 @@ const TUI_COMMANDS = [
   { name: 'sessions', description: 'resume another session of this directory', kind: 'command' },
   { name: 'mcp', description: 'the MCP servers and their tools', kind: 'command' },
   { name: 'agents', description: "watch this session's subagents", kind: 'command' },
+  { name: 'jobs', description: "this session's background jobs", kind: 'command' },
   {
     name: 'rename',
     description: 'rename this session',
@@ -99,6 +101,7 @@ const HELP_TEXT = [
   '  /sessions     resume another session of this directory',
   '  /mcp          the MCP servers and their tools',
   "  /agents       watch this session's subagents (read-only)",
+  "  /jobs         this session's background jobs",
   '  /rename <title>  rename this session',
   '  @path         refer to a file or folder; @ also lists other sessions',
   '  /exit, /quit  quit dsh tui',
@@ -769,6 +772,8 @@ export function App({
   listRefs,
   listAgents,
   openAgent,
+  listJobs,
+  onJobsChanged,
   viewer,
   onBack,
   replayNote = 'resumed',
@@ -812,6 +817,16 @@ export function App({
   const [standing, setStanding] = useState(NO_STANDING);
   // The files this turn changed, shown when it ends (deliverables.js).
   const deliverables = useRef(newDeliverables());
+  // The session's background jobs, as the registry says they changed.
+  const [jobs, setJobs] = useState([]);
+  useEffect(() => {
+    if (typeof listJobs !== 'function' || typeof onJobsChanged !== 'function') {
+      return undefined;
+    }
+    const refresh = () => setJobs(listJobs());
+    refresh();
+    return onJobsChanged(refresh);
+  }, [listJobs, onJobsChanged]);
   const viewportStep = useRef(5);
   const [, setTick] = useState(0); // drives the Working elapsed timer
   const usageRef = useRef(null);
@@ -1496,6 +1511,14 @@ export function App({
         );
         return;
       }
+      if (text === '/jobs') {
+        setInput('');
+        pushItem({
+          kind: 'status',
+          text: jobsText(typeof listJobs === 'function' ? listJobs() : [], Date.now()),
+        });
+        return;
+      }
       if (text === '/mcp') {
         setInput('');
         pushItem({
@@ -1668,6 +1691,7 @@ export function App({
       renameSession,
       listAgents,
       openAgent,
+      listJobs,
       listCommands,
       listModels,
       currentModel,
@@ -1906,6 +1930,10 @@ export function App({
   const hintRightParts = [];
   if (hint !== null) {
     hintRightParts.push(hint);
+  }
+  const badge = jobsBadge(jobs);
+  if (badge !== '') {
+    hintRightParts.push(badge);
   }
   hintRightParts.push(thinkingOpen ? 'ctrl + t: hide thinking' : 'ctrl + t: show thinking');
   hintRightParts.push('ctrl + c quit');

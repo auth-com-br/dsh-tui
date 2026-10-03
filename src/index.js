@@ -393,6 +393,9 @@ async function run(ctx, exit) {
           return agentRows(await subagents.listDescendants(agent.session.id));
         },
         openAgent,
+        // Background jobs (dsh-jobs): listed, never read — see src/jobs.js.
+        listJobs: () => ctx.get('jobs')?.list(agent) ?? [],
+        onJobsChanged: listener => ctx.get('jobs')?.onJobsChanged(() => listener()) ?? (() => {}),
         // A function, not the agent: React's development build walks a
         // component's props to log them, and the agent is a Cordis object
         // that throws on any property it was not given ("cannot get

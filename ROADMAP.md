@@ -68,8 +68,10 @@ Each phase is usable on its own. Order is by what blocks real work first.
 - [x] **Subagents** (`subagent`): `/agents` lists the session's subagent
       tree; one picked is shown read-only, live while it runs, and esc
       comes back. Writing to a continuable one is still to do.
-- [ ] **Jobs and schedules** (`jobs`, `schedule`): background jobs and
-      reminders of the session.
+- [x] **Jobs** (`jobs`): a footer count of the jobs running, and `/jobs`
+      listing them; their output stays the agent's (a read would take it).
+- [ ] **Schedules** (`schedule`): the profile does not mount the schedule
+      service; reminders need it first.
 - [ ] **Workflow runs** (`workflow-run`).
 - [ ] **Trajectory** (`trajectory`): the turn's event ledger with timings.
 
