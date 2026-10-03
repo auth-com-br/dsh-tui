@@ -1,7 +1,8 @@
 /**
  * The MCP servers of this harness, for `/mcp`. The harness connects them
- * itself (dsh-mcp-client, one plugin entry per server in the profile's
- * cordis.patch.yml) and their tools register as `mcp__<server>__<tool>`;
+ * itself (dsh-mcp-client, one plugin entry per server in one of the
+ * patch layers — the machine's, ~/.dsh/cordis.patch.yml, or a profile's) and
+ * their tools register as `mcp__<server>__<tool>`;
  * this only reads what is there: the servers the profile configures, and
  * the tools each one gave the agent.
  *
@@ -123,6 +124,7 @@ export function mcpText(servers, tools, patchPath) {
     'MCP servers:',
     ...rows,
     '',
-    `configured in ${patchPath}; a change takes effect when dsh restarts.`,
+    `configured in ${patchPath} (every profile) or a profile's cordis.patch.yml;`,
+    'a change takes effect when dsh restarts.',
   ].join('\n');
 }

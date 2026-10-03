@@ -322,7 +322,11 @@ async function run(ctx, exit) {
           return mcpText(
             configuredServers(ctx.get('loader')?.root),
             toolsByServer(names),
-            '~/.dsh/profiles/tui/cordis.patch.yml',
+            // The machine's patch layer, over every profile: where tend's
+            // MCP manager keeps dsh's servers.
+            process.env.DSH_HOME?.trim()
+              ? `${process.env.DSH_HOME.trim()}/cordis.patch.yml`
+              : '~/.dsh/cordis.patch.yml',
           );
         },
         // The skills the user can invoke here, for the `/` menu: what the
