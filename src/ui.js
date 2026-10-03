@@ -1139,7 +1139,7 @@ export function App({
             parts.push(usageLine);
           }
           if (isError) {
-            parts.push('/retry 重试');
+            parts.push('/retry to try again');
           }
           const text = parts.join(' · ');
           const changed = deliverablesText(
@@ -1814,7 +1814,7 @@ export function App({
               el(
                 Text,
                 { dimColor: true, color: idleSeconds >= 60 ? ERR : undefined },
-                ` · 模型思考中 ${idleSeconds}s`,
+                ` · model thinking ${idleSeconds}s`,
               ),
             ]
           : []),
