@@ -3,5 +3,9 @@
 - id: headless-runner
   disabled: true
 - insert:
+    # The tool the model asks the user with: a host UI's to compose, and the
+    # TUI's composition has no presets to carry it (dsh-client-ui-user-questions).
+    - id: tool-ask-user
+      name: '@deepseek-ai/dsh-tool-ask-user'
     - id: tui-runner
       name: 'deepseek-harness-tui'

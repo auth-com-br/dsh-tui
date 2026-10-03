@@ -49,6 +49,12 @@ function onApproval(handler) {
   approvalHandler = typeof handler === 'function' ? handler : undefined;
 }
 
+/** The same bridge for the questions the agent asks the user. */
+let questionHandler = undefined;
+function onQuestion(handler) {
+  questionHandler = typeof handler === 'function' ? handler : undefined;
+}
+
 /**
  * Mount the interactive chat driver.
  * @param ctx - plugin context carrying core services and the launcher-provided exit.
@@ -191,12 +197,24 @@ async function run(ctx, exit) {
     return approvalHandler(request);
   });
 
+  // The answerer for the questions this agent asks the user
+  // (dsh-user-questions: ask_user_question, and plan mode's review). With no
+  // answerer the ask fails with NO_PROVIDER and the model is told the user
+  // could not be asked.
+  ctx.on('user-questions/request', (request, next) => {
+    if (request.agent !== agent || questionHandler === undefined) {
+      return next();
+    }
+    return questionHandler(request);
+  });
+
   // exitOnCtrlC: false — the App owns Ctrl-C so it can exit the harness cleanly.
   app = render(
     React.createElement(App, {
       agent,
       onEvent: forward,
       onApproval,
+      onQuestion,
       onExit,
       onInterrupt: () => agent.cancel({ kind: 'user' }),
       onModelSwitch: newModel => {

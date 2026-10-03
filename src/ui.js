@@ -22,6 +22,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
+import { newQuestions, questionKey, questionLines, answersOf } from './questions.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg } from './utils.js';
 
@@ -692,6 +693,7 @@ export function App({
   agent,
   onEvent,
   onApproval,
+  onQuestion,
   onExit,
   onInterrupt,
   firstSeq = 0,
@@ -709,6 +711,9 @@ export function App({
   // Approval requests waiting for the user, oldest first: the first is the
   // one shown. Each carries the resolve of the harness's waiting request.
   const [approvals, setApprovals] = useState([]);
+  // Batches of questions the agent asked, oldest first; the first is being
+  // answered, its state in `state` and its waiting request's resolve.
+  const [asks, setAsks] = useState([]);
   const viewportStep = useRef(5);
   const [, setTick] = useState(0); // drives the Working elapsed timer
   const usageRef = useRef(null);
@@ -790,6 +795,20 @@ export function App({
   // approval is asked, when the composer is not there to type into and y,
   // n and esc answer it.
   useInput((input, key) => {
+    if (asks.length > 0 && approvals.length === 0 && !(key.ctrl && input === 'c')) {
+      setAsks(prev => {
+        if (prev.length === 0) {
+          return prev;
+        }
+        const state = questionKey(prev[0].state, input, key);
+        if (state.done) {
+          prev[0].resolve(answersOf(state));
+          return prev.slice(1);
+        }
+        return [{ ...prev[0], state }, ...prev.slice(1)];
+      });
+      return;
+    }
     if (approvals.length > 0 && !(key.ctrl && input === 'c')) {
       const outcome = approvalOutcome(input, key);
       if (outcome !== null) {
@@ -1052,6 +1071,36 @@ export function App({
     return () => onApproval(null);
   }, [onApproval]);
 
+  // The questions the agent asks (index.js). A request the harness withdraws
+  // leaves the screen and rejects, which the harness reports as aborted.
+  useEffect(() => {
+    if (typeof onQuestion !== 'function') {
+      return undefined;
+    }
+    onQuestion(
+      request =>
+        new Promise((resolve, reject) => {
+          const entry = { state: newQuestions(request.questions ?? []), resolve };
+          if (request.signal) {
+            if (request.signal.aborted) {
+              reject(new Error('the question was withdrawn'));
+              return;
+            }
+            request.signal.addEventListener(
+              'abort',
+              () => {
+                setAsks(prev => prev.filter(a => a !== entry));
+                reject(new Error('the question was withdrawn'));
+              },
+              { once: true },
+            );
+          }
+          setAsks(prev => [...prev, entry]);
+        }),
+    );
+    return () => onQuestion(null);
+  }, [onQuestion]);
+
   const send = useCallback(
     text => {
       const value = typeof text === 'string' ? text.trim() : '';
@@ -1273,30 +1322,46 @@ export function App({
       )
     : null;
 
+  const questionStyle = {
+    title: { bold: true, color: 'cyan' },
+    row: {},
+    selected: { bold: true, color: ACCENT },
+    detail: { dimColor: true },
+    input: { color: ACCENT },
+    keys: { dimColor: true },
+  };
   const inputRow =
-    approvals.length > 0
+    approvals.length === 0 && asks.length > 0
       ? el(
           Box,
           { paddingLeft: 1, paddingRight: 1, flexDirection: 'column' },
-          ...approvalLines(approvals[0], width).map((line, i) =>
-            el(
-              Text,
-              i === 0 ? { key: i, bold: true, color: 'yellow' } : { key: i, dimColor: i > 0 },
-              line,
-            ),
+          ...questionLines(asks[0].state, width).map((line, i) =>
+            el(Text, { key: i, ...questionStyle[line.style] }, line.text),
           ),
         )
-      : el(
-          Box,
-          { paddingLeft: 1, paddingRight: 1, flexDirection: 'row' },
-          el(Text, { bold: true, color: ACCENT }, '❯ '),
-          el(TextInput, {
-            value: input,
-            onChange: setInput,
-            onSubmit: handleSubmit,
-            placeholder: 'Ask anything',
-          }),
-        );
+      : approvals.length > 0
+        ? el(
+            Box,
+            { paddingLeft: 1, paddingRight: 1, flexDirection: 'column' },
+            ...approvalLines(approvals[0], width).map((line, i) =>
+              el(
+                Text,
+                i === 0 ? { key: i, bold: true, color: 'yellow' } : { key: i, dimColor: i > 0 },
+                line,
+              ),
+            ),
+          )
+        : el(
+            Box,
+            { paddingLeft: 1, paddingRight: 1, flexDirection: 'row' },
+            el(Text, { bold: true, color: ACCENT }, '❯ '),
+            el(TextInput, {
+              value: input,
+              onChange: setInput,
+              onSubmit: handleSubmit,
+              placeholder: 'Ask anything',
+            }),
+          );
 
   const hintLeft = `  ${model} · ${shortCwd}`;
   const hintRightParts = [];

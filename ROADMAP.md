@@ -29,7 +29,7 @@ Each phase is usable on its own. Order is by what blocks real work first.
       closed: anything outside the workspace or needing more access is
       impossible ("no approval channel is available"). A prompt in place of
       the composer: what the agent wants to do, allow once / always / deny.
-- [ ] **Questions from the agent** (`dsh-client-ui-user-questions`): the
+- [x] **Questions from the agent** (`dsh-client-ui-user-questions`): the
       agent asks, the composer becomes the answer.
 - [ ] **Permission presets** (`dsh-client-ui-permission-presets`):
       `/permission` to switch the session's (read-only, workspace-write,
