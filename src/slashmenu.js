@@ -177,7 +177,7 @@ export function menuLines(rows, cursor, width) {
     Math.max(0, rows.length - MAX_ROWS),
   );
   const shown = rows.slice(start, start + MAX_ROWS);
-  const nameWidth = Math.min(28, Math.max(...shown.map(r => label(r).length)) + 2);
+  const nameWidth = Math.min(40, Math.max(...shown.map(r => label(r).length)) + 2);
   const out = shown.map((r, i) => {
     const here = start + i === cursor;
     const tag = r.kind === 'skill' ? 'skill · ' : '';
@@ -195,6 +195,10 @@ export function menuLines(rows, cursor, width) {
   return out;
 }
 
+// A row's text: an `@` reference's own label (refs.js), else the command.
 function label(row) {
+  if (row.label !== undefined) {
+    return row.label;
+  }
   return `/${row.name}${row.hint ? ' ' + row.hint : ''}`;
 }

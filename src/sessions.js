@@ -71,6 +71,28 @@ export function titleOf(events) {
 }
 
 /**
+ * What a session is found by besides its title: the user's own messages,
+ * up to a bound — a title is often only the first words of the first one.
+ * @param {readonly {type: string, data?: any}[]} events
+ */
+export function searchTextOf(events) {
+  let out = '';
+  for (const e of events) {
+    if (e.type === 'user/message' && e.data?.source?.kind === 'user') {
+      for (const c of e.data.content ?? []) {
+        if (c.type === 'text' && typeof c.text === 'string') {
+          out += ` ${c.text}`;
+        }
+      }
+      if (out.length > 4000) {
+        break;
+      }
+    }
+  }
+  return out.slice(0, 4000);
+}
+
+/**
  * How many messages the user wrote in a session.
  * @param {readonly {type: string, data?: any}[]} events
  */

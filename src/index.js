@@ -13,7 +13,16 @@ import { render } from 'ink';
 import { installModelSelection } from '@deepseek-ai/dsh-agent';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { App } from './ui.js';
-import { parseArgs, USAGE, listSessions } from './sessions.js';
+import {
+  parseArgs,
+  USAGE,
+  listSessions,
+  titleOf,
+  userMessages,
+  searchTextOf,
+  whenOf,
+} from './sessions.js';
+import { refRows } from './refs.js';
 import { configuredServers, toolsByServer, mcpText } from './mcp.js';
 
 /** Stable Cordis plugin name (bundle row id: tui-runner). */
@@ -288,6 +297,28 @@ async function run(ctx, exit) {
     mount();
   };
 
+  // Sessions' titles for the `@` menu, read once each from their logs. The
+  // resolver labels a session by its id unless a projection has its title,
+  // which most sessions on disk lack until reopened, so the menu would be a
+  // list of ids; and it finds sessions by that label, so the query is
+  // matched here, against the title, instead.
+  const titles = new Map();
+  const titleFor = async id => {
+    if (!titles.has(id)) {
+      try {
+        const { events } = await persistence.load(id);
+        titles.set(id, {
+          title: titleOf(events),
+          messages: userMessages(events),
+          text: searchTextOf(events),
+        });
+      } catch {
+        titles.set(id, { title: undefined, messages: 1, text: '' });
+      }
+    }
+    return titles.get(id);
+  };
+
   // exitOnCtrlC: false — the App owns Ctrl-C so it can exit the harness cleanly.
   const mount = () => {
     const { agent, firstSeq, selected, resumed } = current;
@@ -332,6 +363,46 @@ async function run(ctx, exit) {
         // The skills the user can invoke here, for the `/` menu: what the
         // web app's skill source lists (skills/list), read from the skill
         // registry for this directory and agent.
+        // @ references: the workspace's paths (dsh-file-reference-local)
+        // and, unless a quoted path was opened, other sessions — those
+        // somebody wrote in — as the resolver's mentions (src/refs.js).
+        listRefs: async (query, quoted) => {
+          const signal = new AbortController().signal;
+          const files = ctx.get('fileReferences');
+          const resolver = ctx.get('sessionReferenceResolver');
+          const [paths, candidates] = await Promise.all([
+            files ? files.list(agent, query, signal).catch(() => []) : [],
+            resolver && !quoted
+              ? resolver.remoteExportCandidates(agent, '', signal).catch(() => [])
+              : [],
+          ]);
+          const q = query.toLowerCase();
+          // This directory's sessions first, then the newest; the titles of
+          // the first hundred are read, together.
+          const ranked = [...candidates]
+            .sort(
+              (a, b) =>
+                Number(b.sameWorkspace) - Number(a.sameWorkspace) || b.createdAt - a.createdAt,
+            )
+            .slice(0, 100);
+          const read = await Promise.all(ranked.map(c => titleFor(c.sessionId)));
+          const found = [];
+          for (const [i, c] of ranked.entries()) {
+            const t = read[i];
+            const label = t.title ?? c.label;
+            if (t.messages === 0) {
+              continue;
+            }
+            if (
+              q !== '' &&
+              !`${label} ${c.sessionId} ${c.cwd ?? ''} ${t.text}`.toLowerCase().includes(q)
+            ) {
+              continue;
+            }
+            found.push({ ...c, label, when: whenOf(c.createdAt, Date.now()) });
+          }
+          return refRows(paths.slice(0, 50), found, quoted);
+        },
         listSkills: async () => {
           const skills = ctx.get('skills');
           if (skills === undefined) {

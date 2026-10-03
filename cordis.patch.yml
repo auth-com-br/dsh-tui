@@ -7,5 +7,16 @@
     # TUI's composition has no presets to carry it (dsh-client-ui-user-questions).
     - id: tool-ask-user
       name: '@deepseek-ai/dsh-tool-ask-user'
+    # @ references in the composer, as the web app mounts them
+    # (dsh-web-app): path candidates from the agent's workspace, and other
+    # sessions, whose mentions the resolver turns into read-only context.
+    - id: file-reference-local
+      name: '@deepseek-ai/dsh-file-reference-local'
+    - id: session-reference
+      name: '@deepseek-ai/dsh-session-reference'
+      config:
+        # Every session, not the default 50 in an order of the store's: the
+        # menu matches titles itself, newest first (src/index.js).
+        candidateLimit: 200
     - id: tui-runner
       name: 'deepseek-harness-tui'

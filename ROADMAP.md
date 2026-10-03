@@ -48,8 +48,9 @@ Each phase is usable on its own. Order is by what blocks real work first.
       menu as `/` is typed — the TUI's commands, the harness's and the
       skills — ranked as the web app ranks them; a skill picked goes in the
       message and the harness loads it.
-- [ ] **`@` references** (`reference`): files and sessions, completed as
-      typed.
+- [x] **`@` references** (`reference`): files and sessions, completed as
+      typed — a file is a path the model reads, a session is attached as a
+      read-only snapshot by the harness.
 - [ ] **Plan mode and goal** (`plan`, `goal`): the plan chip, the session's
       goal with edit/pause/resume/clear.
 - [ ] **Deliverables** (`deliverables`): the files a turn changed, at its

@@ -25,6 +25,7 @@ import TextInput from 'ink-text-input';
 import { newQuestions, questionKey, questionLines, answersOf } from './questions.js';
 import { whenOf } from './sessions.js';
 import { menuQuery, menuRows, menuLines, pickRow, leadingName } from './slashmenu.js';
+import { activeAtToken, replaceToken, shownMentions } from './refs.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg } from './utils.js';
 
@@ -87,6 +88,7 @@ const HELP_TEXT = [
   '  /model [name]  choose the model (provider/model)',
   '  /sessions     resume another session of this directory',
   '  /mcp          the MCP servers and their tools',
+  '  @path         refer to a file or folder; @ also lists other sessions',
   '  /exit, /quit  quit dsh tui',
   'keys:',
   '  ↑ / ↓          scroll transcript',
@@ -751,6 +753,7 @@ export function App({
   switchSession,
   listSkills,
   mcpStatus,
+  listRefs,
   history = [],
   onExit,
   onInterrupt,
@@ -785,6 +788,8 @@ export function App({
   const [menuClosedFor, setMenuClosedFor] = useState(null);
   const [skills, setSkills] = useState(undefined);
   const [inputKey, setInputKey] = useState(0);
+  // The `@` menu's rows and the token they were asked for.
+  const [refs, setRefs] = useState({ key: undefined, rows: [] });
   const viewportStep = useRef(5);
   const [, setTick] = useState(0); // drives the Working elapsed timer
   const usageRef = useRef(null);
@@ -879,30 +884,77 @@ export function App({
       );
     }
   }, [query, skills, listSkills]);
+  // The `@` menu, open while an `@` token is being typed at the end of the
+  // line: its candidates are the harness's, asked for a moment after the
+  // last key, and the last answer stays up while the next is coming.
+  const atKey =
+    query === undefined && approvals.length === 0 && asks.length === 0
+      ? activeAtToken(input)?.prefix
+      : undefined;
+  useEffect(() => {
+    if (atKey === undefined || typeof listRefs !== 'function') {
+      return undefined;
+    }
+    let live = true;
+    const quoted = atKey.startsWith('@"');
+    const timer = setTimeout(() => {
+      Promise.resolve(listRefs(atKey.slice(quoted ? 2 : 1), quoted)).then(
+        rows => {
+          if (live) {
+            setRefs({ key: atKey, rows });
+          }
+        },
+        () => {},
+      );
+    }, 80);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [atKey, listRefs]);
   const menu =
-    query === undefined || menuClosedFor === input
+    menuClosedFor === input
       ? []
-      : menuRows(
-          {
-            commands: [
-              ...TUI_COMMANDS,
-              ...(typeof listCommands === 'function' ? listCommands() : []).map(c => ({
-                name: c.name,
-                description: c.description,
-                kind: 'command',
-                takesInput: c.input !== undefined,
-                hint: c.input?.hint,
-              })),
-            ],
-            skills: skills ?? [],
-          },
-          query,
-        );
+      : query === undefined
+        ? atKey !== undefined && refs.key !== undefined
+          ? refs.rows
+          : []
+        : menuRows(
+            {
+              commands: [
+                ...TUI_COMMANDS,
+                ...(typeof listCommands === 'function' ? listCommands() : []).map(c => ({
+                  name: c.name,
+                  description: c.description,
+                  kind: 'command',
+                  takesInput: c.input !== undefined,
+                  hint: c.input?.hint,
+                })),
+              ],
+              skills: skills ?? [],
+            },
+            query,
+          );
   const cursor = Math.min(menuCursor, Math.max(0, menu.length - 1));
   useEffect(() => {
     setMenuCursor(0);
-  }, [query]);
+  }, [query, atKey]);
+  // An `@` row replaces the token being typed: settled (enter), or for a
+  // folder, opened to go on completing inside it (tab).
+  const pickRef = (row, drill) => {
+    const line = composerText.current;
+    const token = activeAtToken(line);
+    if (token === undefined) {
+      return;
+    }
+    setInput(replaceToken(line, token, drill && row.drill ? row.drill : row.settle));
+    setInputKey(k => k + 1);
+  };
   const pickFromMenu = row => {
+    if (row.settle !== undefined) {
+      pickRef(row, false);
+      return;
+    }
     const pick = pickRow(row);
     if ('insert' in pick) {
       setInput(pick.insert);
@@ -948,8 +1000,12 @@ export function App({
         return;
       }
       if (key.tab) {
-        setInput(`/${menu[cursor].name} `);
-        setInputKey(k => k + 1);
+        if (menu[cursor].settle !== undefined) {
+          pickRef(menu[cursor], true);
+        } else {
+          setInput(`/${menu[cursor].name} `);
+          setInputKey(k => k + 1);
+        }
         return;
       }
       if (key.escape) {
@@ -994,7 +1050,7 @@ export function App({
           if (replaying.current && data.source?.kind === 'user') {
             const text = (data.content ?? []).find(c => c.type === 'text')?.text;
             if (typeof text === 'string' && text.trim() !== '') {
-              pushItem({ kind: 'user', text: text.trim() });
+              pushItem({ kind: 'user', text: shownMentions(text.trim()) });
             }
           }
           break;
@@ -1290,7 +1346,7 @@ export function App({
       setScrollLines(0);
       setBusy(true);
       lastUserText.current = value;
-      pushItem({ kind: 'user', text: value });
+      pushItem({ kind: 'user', text: shownMentions(value) });
       try {
         // Fire-and-forget: session events drive the UI, not this promise.
         followup(

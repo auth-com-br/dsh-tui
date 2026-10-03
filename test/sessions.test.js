@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs, titleOf, listSessions, whenOf } from '../src/sessions.js';
+import { parseArgs, titleOf, listSessions, whenOf, searchTextOf } from '../src/sessions.js';
 
 /**
  * Resuming sessions: the TUI's command line, and the list it resumes from.
@@ -83,5 +83,15 @@ describe('whenOf', () => {
     assert.equal(whenOf(new Date(2026, 9, 3, 9, 5).getTime(), now), 'today 09:05');
     assert.match(whenOf(new Date(2026, 9, 1, 9, 5).getTime(), now), /^[A-Z][a-z]{2} 09:05$/);
     assert.equal(whenOf(new Date(2026, 8, 1).getTime(), now), '2026-09-01');
+  });
+});
+
+describe('searchTextOf', () => {
+  test('is the user messages, so a session is found by words its title cut off', () => {
+    const text = searchTextOf([
+      user('responda apenas com a palavra: abacaxi'),
+      { type: 'assistant/message' },
+    ]);
+    assert.match(text, /abacaxi/);
   });
 });
