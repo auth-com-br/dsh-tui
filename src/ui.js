@@ -79,6 +79,13 @@ const TUI_COMMANDS = [
   { name: 'model', description: 'choose the model', kind: 'command' },
   { name: 'sessions', description: 'resume another session of this directory', kind: 'command' },
   { name: 'mcp', description: 'the MCP servers and their tools', kind: 'command' },
+  {
+    name: 'rename',
+    description: 'rename this session',
+    kind: 'command',
+    takesInput: true,
+    hint: '<title>',
+  },
   { name: 'exit', description: 'quit', kind: 'command' },
 ];
 
@@ -90,6 +97,7 @@ const HELP_TEXT = [
   '  /model [name]  choose the model (provider/model)',
   '  /sessions     resume another session of this directory',
   '  /mcp          the MCP servers and their tools',
+  '  /rename <title>  rename this session',
   '  @path         refer to a file or folder; @ also lists other sessions',
   '  /exit, /quit  quit dsh tui',
   'keys:',
@@ -755,6 +763,7 @@ export function App({
   switchSession,
   listSkills,
   mcpStatus,
+  renameSession,
   listRefs,
   history = [],
   onExit,
@@ -1398,6 +1407,27 @@ export function App({
         });
         return;
       }
+      // The session's title, as the web app renames it (sessionTitle): what
+      // /sessions and the @ menu list it by.
+      if (text === '/rename' || text.startsWith('/rename ')) {
+        setInput('');
+        const title = text.slice('/rename'.length).trim();
+        if (title === '') {
+          pushItem({ kind: 'status', text: 'usage: /rename <title>' });
+          return;
+        }
+        try {
+          const accepted = renameSession(title);
+          pushItem({ kind: 'status', text: `renamed: ${accepted?.title ?? title}` });
+        } catch (error) {
+          pushItem({
+            kind: 'status',
+            text: `✗ ${error instanceof Error ? error.message : String(error)}`,
+            error: true,
+          });
+        }
+        return;
+      }
       if (text === '/mcp') {
         setInput('');
         pushItem({
@@ -1567,6 +1597,7 @@ export function App({
       runCommand,
       skills,
       mcpStatus,
+      renameSession,
       listCommands,
       listModels,
       currentModel,

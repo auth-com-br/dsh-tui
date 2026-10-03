@@ -363,6 +363,13 @@ async function run(ctx, exit) {
         // The skills the user can invoke here, for the `/` menu: what the
         // web app's skill source lists (skills/list), read from the skill
         // registry for this directory and agent.
+        renameSession: title => {
+          const titles = ctx.get('sessionTitle');
+          if (titles === undefined) {
+            throw new Error('renaming needs the session-title service, not in this profile');
+          }
+          return titles.rename(agent.session, title);
+        },
         // @ references: the workspace's paths (dsh-file-reference-local)
         // and, unless a quoted path was opened, other sessions — those
         // somebody wrote in — as the resolver's mentions (src/refs.js).

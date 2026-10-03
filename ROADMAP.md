@@ -42,8 +42,9 @@ Each phase is usable on its own. Order is by what blocks real work first.
 
 - [x] **Sessions** (`session`, `workspace`, `sidebar`): `/sessions` lists
       this directory's and resumes one with its history; `--resume <id>`
-      and `-c` from the command line (tend's "continue in…"). Rename and
-      delete are still to do.
+      and `-c` from the command line (tend's "continue in…"); `/rename`.
+      Deleting is left out: the harness has no way to (the web app
+      neither).
 - [x] **`/` commands and skills** (`commands`, `skill`, `input-trigger`): a
       menu as `/` is typed — the TUI's commands, the harness's and the
       skills — ranked as the web app ranks them; a skill picked goes in the
