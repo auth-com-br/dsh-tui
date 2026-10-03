@@ -14,6 +14,7 @@ import { installModelSelection } from '@deepseek-ai/dsh-agent';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { App } from './ui.js';
 import { parseArgs, USAGE, listSessions } from './sessions.js';
+import { configuredServers, toolsByServer, mcpText } from './mcp.js';
 
 /** Stable Cordis plugin name (bundle row id: tui-runner). */
 export const name = 'tui-runner';
@@ -313,6 +314,17 @@ async function run(ctx, exit) {
           return commands.execute(agent, line, [], new AbortController().signal);
         },
         listCommands: () => ctx.get('commands')?.list(agent) ?? [],
+        // /mcp: the servers the profile configures and the tools the agent
+        // got from each (src/mcp.js).
+        mcpStatus: () => {
+          const tools = ctx.get('tools');
+          const names = tools?.view?.(agent)?.visible?.keys?.() ?? [];
+          return mcpText(
+            configuredServers(ctx.get('loader')?.root),
+            toolsByServer(names),
+            '~/.dsh/profiles/tui/cordis.patch.yml',
+          );
+        },
         // The skills the user can invoke here, for the `/` menu: what the
         // web app's skill source lists (skills/list), read from the skill
         // registry for this directory and agent.
@@ -373,5 +385,13 @@ async function run(ctx, exit) {
       { exitOnCtrlC: false },
     );
   };
+  // A stdio MCP server's stderr is the harness's — the MCP SDK spawns it
+  // inherited, and dsh-mcp-client has no setting for it — so its banner
+  // ("… running on stdio") is on the screen before the TUI draws. The
+  // servers connect before the loader settles, so clearing once here takes
+  // it away.
+  if (process.stdout.isTTY) {
+    process.stdout.write('\x1b[2J\x1b[H');
+  }
   mount();
 }

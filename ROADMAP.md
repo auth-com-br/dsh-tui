@@ -55,6 +55,11 @@ Each phase is usable on its own. Order is by what blocks real work first.
 - [ ] **Deliverables** (`deliverables`): the files a turn changed, at its
       end.
 
+- [x] **MCP servers**: `/mcp` lists the servers the profile configures
+      (`dsh-mcp-client` entries) and the tools each gave, or that it gave
+      none; tend's MCP manager adds, removes and switches them. The web app
+      has no MCP surface; this is the TUI's own.
+
 ## Phase 3 — the agent's wider work
 
 - [ ] **Subagents** (`subagent`): their conversations, opened from the

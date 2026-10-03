@@ -75,6 +75,7 @@ const TUI_COMMANDS = [
   { name: 'retry', description: 're-send the last message', kind: 'command' },
   { name: 'model', description: 'choose the model', kind: 'command' },
   { name: 'sessions', description: 'resume another session of this directory', kind: 'command' },
+  { name: 'mcp', description: 'the MCP servers and their tools', kind: 'command' },
   { name: 'exit', description: 'quit', kind: 'command' },
 ];
 
@@ -85,6 +86,7 @@ const HELP_TEXT = [
   '  /retry        re-send the last message',
   '  /model [name]  choose the model (provider/model)',
   '  /sessions     resume another session of this directory',
+  '  /mcp          the MCP servers and their tools',
   '  /exit, /quit  quit dsh tui',
   'keys:',
   '  ↑ / ↓          scroll transcript',
@@ -748,6 +750,7 @@ export function App({
   listSessions,
   switchSession,
   listSkills,
+  mcpStatus,
   history = [],
   onExit,
   onInterrupt,
@@ -1322,6 +1325,14 @@ export function App({
         });
         return;
       }
+      if (text === '/mcp') {
+        setInput('');
+        pushItem({
+          kind: 'status',
+          text: typeof mcpStatus === 'function' ? mcpStatus() : 'no MCP support here',
+        });
+        return;
+      }
       if (text === '/clear') {
         setInput('');
         clearHint();
@@ -1482,6 +1493,7 @@ export function App({
       flashHint,
       runCommand,
       skills,
+      mcpStatus,
       listCommands,
       listModels,
       currentModel,
