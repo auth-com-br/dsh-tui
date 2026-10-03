@@ -30,6 +30,7 @@ import { NO_STANDING, foldStanding, standingLines } from './status.js';
 import { newDeliverables, foldDeliverables, deliverablesText } from './deliverables.js';
 import { jobsBadge, jobsText } from './jobs.js';
 import { foldWorkflow, workflowText } from './workflow.js';
+import { trajectoryText } from './trajectory.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg } from './utils.js';
 
@@ -84,6 +85,13 @@ const TUI_COMMANDS = [
   { name: 'agents', description: "watch this session's subagents", kind: 'command' },
   { name: 'jobs', description: "this session's background jobs", kind: 'command' },
   {
+    name: 'trajectory',
+    description: 'the last turns with their steps, tools and timings',
+    kind: 'command',
+    takesInput: true,
+    hint: '[turns]',
+  },
+  {
     name: 'rename',
     description: 'rename this session',
     kind: 'command',
@@ -103,6 +111,7 @@ const HELP_TEXT = [
   '  /mcp          the MCP servers and their tools',
   "  /agents       watch this session's subagents (read-only)",
   "  /jobs         this session's background jobs",
+  '  /trajectory [n]  the last n turns with steps, tools and timings',
   '  /rename <title>  rename this session',
   '  @path         refer to a file or folder; @ also lists other sessions',
   '  /exit, /quit  quit dsh tui',
@@ -775,6 +784,7 @@ export function App({
   openAgent,
   listJobs,
   onJobsChanged,
+  sessionEvents,
   viewer,
   onBack,
   replayNote = 'resumed',
@@ -1524,6 +1534,20 @@ export function App({
         );
         return;
       }
+      // The last turns as a ledger with timings: /trajectory, or
+      // /trajectory 3 for the last three.
+      if (text === '/trajectory' || text.startsWith('/trajectory ')) {
+        setInput('');
+        const n = Number.parseInt(text.slice('/trajectory'.length).trim() || '1', 10);
+        pushItem({
+          kind: 'status',
+          text:
+            typeof sessionEvents === 'function'
+              ? trajectoryText(sessionEvents(), Number.isFinite(n) && n > 0 ? n : 1, Date.now())
+              : 'no session log here',
+        });
+        return;
+      }
       if (text === '/jobs') {
         setInput('');
         pushItem({
@@ -1705,6 +1729,7 @@ export function App({
       listAgents,
       openAgent,
       listJobs,
+      sessionEvents,
       listCommands,
       listModels,
       currentModel,

@@ -393,6 +393,7 @@ async function run(ctx, exit) {
           return agentRows(await subagents.listDescendants(agent.session.id));
         },
         openAgent,
+        sessionEvents: () => agent.session.snapshotEvents(),
         // Background jobs (dsh-jobs): listed, never read — see src/jobs.js.
         listJobs: () => ctx.get('jobs')?.list(agent) ?? [],
         onJobsChanged: listener => ctx.get('jobs')?.onJobsChanged(() => listener()) ?? (() => {}),

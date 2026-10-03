@@ -74,7 +74,9 @@ Each phase is usable on its own. Order is by what blocks real work first.
       service; reminders need it first.
 - [x] **Workflow runs** (`workflow-run`): a block per run that follows
       it live — its phases, each agent's status, how it ended.
-- [ ] **Trajectory** (`trajectory`): the turn's event ledger with timings.
+- [x] **Trajectory** (`trajectory`): `/trajectory [n]`, the last turns'
+      ledger — steps, model time and tokens, each tool with its time and
+      outcome.
 
 ## Phase 4 — settings in the terminal
 
