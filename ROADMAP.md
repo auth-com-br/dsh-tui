@@ -72,7 +72,8 @@ Each phase is usable on its own. Order is by what blocks real work first.
       listing them; their output stays the agent's (a read would take it).
 - [ ] **Schedules** (`schedule`): the profile does not mount the schedule
       service; reminders need it first.
-- [ ] **Workflow runs** (`workflow-run`).
+- [x] **Workflow runs** (`workflow-run`): a block per run that follows
+      it live — its phases, each agent's status, how it ended.
 - [ ] **Trajectory** (`trajectory`): the turn's event ledger with timings.
 
 ## Phase 4 — settings in the terminal

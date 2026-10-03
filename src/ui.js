@@ -29,6 +29,7 @@ import { activeAtToken, replaceToken, shownMentions } from './refs.js';
 import { NO_STANDING, foldStanding, standingLines } from './status.js';
 import { newDeliverables, foldDeliverables, deliverablesText } from './deliverables.js';
 import { jobsBadge, jobsText } from './jobs.js';
+import { foldWorkflow, workflowText } from './workflow.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg } from './utils.js';
 
@@ -817,6 +818,7 @@ export function App({
   const [standing, setStanding] = useState(NO_STANDING);
   // The files this turn changed, shown when it ends (deliverables.js).
   const deliverables = useRef(newDeliverables());
+  const workflowRuns = useRef(new Map());
   // The session's background jobs, as the registry says they changed.
   const [jobs, setJobs] = useState([]);
   useEffect(() => {
@@ -1089,6 +1091,17 @@ export function App({
       const data = event.data && typeof event.data === 'object' ? event.data : {};
       setStanding(s => foldStanding(s, event));
       deliverables.current = foldDeliverables(deliverables.current, event);
+      // A workflow run is one block in the transcript, redrawn as its
+      // members start and end.
+      const run = foldWorkflow(workflowRuns.current, event);
+      if (run !== undefined) {
+        const block = { kind: 'status', workflow: run.runId, text: workflowText(run) };
+        setItems(prev =>
+          prev.some(i => i.workflow === run.runId)
+            ? prev.map(i => (i.workflow === run.runId ? block : i))
+            : [...prev, block],
+        );
+      }
       switch (event.type) {
         case 'user/message': {
           // Live, the user's own message is on screen already (send pushes
