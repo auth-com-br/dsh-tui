@@ -92,12 +92,15 @@ async function run(ctx, exit) {
 
   // Create the agent exactly like the headless runner does.
   const selection = defaultModel.currentSelection();
+  // The agent's model, read by the harness at each step (installModelSelection):
+  // /model switches it by replacing `current`, which takes effect on the next
+  // step rather than splitting one in flight.
+  const selected = { current: selection, assembled: undefined };
   const { agent } = await agents.create({
     sessionId: SessionId(`session-${randomUUID()}`),
     meta: { cwd: process.cwd() },
     agentOptions: { provider: selection.provider, model: selection.model },
     setup: agentCtx => {
-      const selected = { current: selection, assembled: undefined };
       installModelSelection(agentCtx, selected);
     },
   });
@@ -215,32 +218,49 @@ async function run(ctx, exit) {
       onEvent: forward,
       onApproval,
       onQuestion,
+      // The harness's slash commands (dsh-commands): /permission, /goal,
+      // /compact and whatever else the profile composes. They run against
+      // the agent and never become a model message; an unknown or malformed
+      // line returns undefined.
+      runCommand: line => {
+        const commands = ctx.get('commands');
+        if (commands === undefined) {
+          return Promise.resolve(undefined);
+        }
+        return commands.execute(agent, line, [], new AbortController().signal);
+      },
+      listCommands: () => ctx.get('commands')?.list(agent) ?? [],
       onExit,
       onInterrupt: () => agent.cancel({ kind: 'user' }),
-      onModelSwitch: newModel => {
-        try {
-          // Update the default model selection so the next turn uses the new model.
-          // The agent's model selection is installed via installModelSelection;
-          // we update the selection object's `current` to reflect the new model.
-          const selection = defaultModel.currentSelection();
-          if (selection && selection.model === newModel) {
-            return true;
-          }
-          // Best-effort: update the default model source if the API supports it.
-          if (typeof defaultModel.updateSelection === 'function') {
-            defaultModel.updateSelection({ ...selection, model: newModel });
-            return true;
-          }
-          // Fallback: the selection object is mutable (installed via installModelSelection).
-          const installed = agent.ctx?.get?.('__modelSelection__');
-          if (installed && installed.current) {
-            installed.current = { ...installed.current, model: newModel };
-            return true;
-          }
-          return false;
-        } catch {
-          return false;
+      // /model: the models of every configured route, the current one, and
+      // a switch that also becomes the default for later sessions, as the
+      // web app's model selection saves it.
+      listModels: async () => {
+        const llm = ctx.get('llm');
+        if (llm === undefined) {
+          return [];
         }
+        const out = [];
+        for (const provider of llm.listProviders()) {
+          try {
+            for (const m of await llm.listModels(provider.id)) {
+              out.push({
+                provider: provider.id,
+                providerName: provider.name,
+                model: m.id,
+                name: m.name,
+              });
+            }
+          } catch {
+            // A route that cannot list its models is left out, not fatal.
+          }
+        }
+        return out;
+      },
+      currentModel: () => selected.current,
+      selectModel: next => {
+        selected.current = { provider: next.provider, model: next.model };
+        void Promise.resolve(defaultModel.saveSelection?.(selected.current)).catch(() => {});
       },
       firstSeq,
       model: selection.model,

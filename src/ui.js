@@ -71,6 +71,7 @@ const HELP_TEXT = [
   '  /help         show this help',
   '  /clear        clear the transcript',
   '  /retry        re-send the last message',
+  '  /model [name]  choose the model (provider/model)',
   '  /exit, /quit  quit dsh tui',
   'keys:',
   '  ↑ / ↓          scroll transcript',
@@ -79,6 +80,38 @@ const HELP_TEXT = [
   '  ctrl + t       toggle thinking display',
   '  ctrl + c       quit',
 ].join('\n');
+
+/**
+ * The model a /model argument names: "provider/model", or a model id alone
+ * when one route has it.
+ * @param {Array<{provider: string, model: string}>} models
+ * @param {string} wanted
+ */
+export function pickModel(models, wanted) {
+  const w = wanted.trim();
+  return (
+    models.find(m => `${m.provider}/${m.model}` === w) ??
+    (models.filter(m => m.model === w).length === 1 ? models.find(m => m.model === w) : undefined)
+  );
+}
+
+/**
+ * The help: the TUI's own commands and keys, then the harness's commands
+ * (dsh-commands) with their input hints and descriptions.
+ * @param {ReadonlyArray<{name: string, description: string, input?: {hint?: string}}>} commands
+ */
+export function helpText(commands) {
+  if (!commands || commands.length === 0) {
+    return HELP_TEXT;
+  }
+  const rows = [...commands]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(c => {
+      const head = `/${c.name}${c.input?.hint ? ' ' + c.input.hint : ''}`;
+      return `  ${head.padEnd(26)} ${c.description}`;
+    });
+  return [HELP_TEXT, 'harness commands:', ...rows].join('\n');
+}
 
 // ── Width helpers (CJK-aware) ────────────────────────────────────────────
 
@@ -694,6 +727,11 @@ export function App({
   onEvent,
   onApproval,
   onQuestion,
+  runCommand,
+  listCommands,
+  listModels,
+  currentModel,
+  selectModel,
   onExit,
   onInterrupt,
   firstSeq = 0,
@@ -711,6 +749,8 @@ export function App({
   // Approval requests waiting for the user, oldest first: the first is the
   // one shown. Each carries the resolve of the harness's waiting request.
   const [approvals, setApprovals] = useState([]);
+  // The model shown in the footer, which /model changes.
+  const [modelLabel, setModelLabel] = useState(model);
   // Batches of questions the agent asked, oldest first; the first is being
   // answered, its state in `state` and its waiting request's resolve.
   const [asks, setAsks] = useState([]);
@@ -1145,7 +1185,10 @@ export function App({
       if (text === '/help') {
         setInput('');
         setHint(null);
-        pushItem({ kind: 'status', text: HELP_TEXT });
+        pushItem({
+          kind: 'status',
+          text: helpText(typeof listCommands === 'function' ? listCommands() : []),
+        });
         return;
       }
       if (text === '/clear') {
@@ -1178,13 +1221,98 @@ export function App({
         }
         return;
       }
+      if ((text === '/model' || text.startsWith('/model ')) && typeof listModels === 'function') {
+        setInput('');
+        const wanted = text.slice('/model'.length).trim();
+        void Promise.resolve(listModels()).then(models => {
+          if (models.length === 0) {
+            pushItem({ kind: 'status', text: 'no models are configured' });
+            return;
+          }
+          const apply = m => {
+            selectModel(m);
+            setModelLabel(m.model);
+            pushItem({
+              kind: 'status',
+              text: `model ${m.provider}/${m.model} — from the next step, and for new sessions`,
+            });
+          };
+          if (wanted !== '') {
+            const m = pickModel(models, wanted);
+            if (m === undefined) {
+              pushItem({ kind: 'status', text: `no model ${wanted} — /model lists them` });
+            } else {
+              apply(m);
+            }
+            return;
+          }
+          // Chosen with the question screen: the routes' models as options,
+          // the current one marked.
+          const now = typeof currentModel === 'function' ? currentModel() : undefined;
+          const options = models.map(m => ({
+            label: `${m.provider}/${m.model}`,
+            description:
+              (m.name && m.name !== m.model ? m.name : m.providerName) +
+              (now && now.provider === m.provider && now.model === m.model ? ' · current' : ''),
+          }));
+          const entry = {
+            state: newQuestions([{ id: 'model', question: 'Model for this session', options }]),
+            resolve: answer => {
+              const label = answer.answers[0]?.selected?.[0] ?? answer.answers[0]?.custom;
+              const m = label ? pickModel(models, label) : undefined;
+              if (m !== undefined) {
+                apply(m);
+              }
+            },
+          };
+          setAsks(prev => [...prev, entry]);
+        });
+        return;
+      }
+      // Any other /command is the harness's (dsh-commands): it runs against
+      // the agent, never as a model message — a line naming no command is
+      // said so rather than sent to the model.
+      if (text.startsWith('/') && typeof runCommand === 'function') {
+        setInput('');
+        void Promise.resolve(runCommand(text)).then(
+          execution => {
+            if (execution === undefined) {
+              pushItem({
+                kind: 'status',
+                text: `unknown command ${text.split(/\s/)[0]} — /help lists them`,
+              });
+              return;
+            }
+            const result = execution.result ?? {};
+            const said = result.text ?? (result.kind === 'error' ? 'failed' : 'done');
+            pushItem({ kind: 'status', text: result.kind === 'error' ? `✗ ${said}` : said });
+          },
+          error =>
+            pushItem({
+              kind: 'status',
+              text: `✗ ${error instanceof Error ? error.message : String(error)}`,
+            }),
+        );
+        return;
+      }
       if (busy) {
         showBusyHint();
         return;
       }
       send(text);
     },
-    [busy, handleExit, send, showBusyHint, flashHint],
+    [
+      busy,
+      handleExit,
+      send,
+      showBusyHint,
+      flashHint,
+      runCommand,
+      listCommands,
+      listModels,
+      currentModel,
+      selectModel,
+    ],
   );
 
   // ── Viewport: keep the transcript tail visible (bottom-anchored), with
@@ -1363,7 +1491,7 @@ export function App({
             }),
           );
 
-  const hintLeft = `  ${model} · ${shortCwd}`;
+  const hintLeft = `  ${modelLabel} · ${shortCwd}`;
   const hintRightParts = [];
   if (hint !== null) {
     hintRightParts.push(hint);

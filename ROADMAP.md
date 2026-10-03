@@ -31,10 +31,10 @@ Each phase is usable on its own. Order is by what blocks real work first.
       the composer: what the agent wants to do, allow once / always / deny.
 - [x] **Questions from the agent** (`dsh-client-ui-user-questions`): the
       agent asks, the composer becomes the answer.
-- [ ] **Permission presets** (`dsh-client-ui-permission-presets`):
+- [x] **Permission presets** (`dsh-client-ui-permission-presets`):
       `/permission` to switch the session's (read-only, workspace-write,
       full access), and the default for new sessions.
-- [ ] **Model selection** (`dsh-client-ui-model-selection`): `/model` lists
+- [x] **Model selection** (`dsh-client-ui-model-selection`): `/model` lists
       the configured routes and models — the local server among them — and
       switches the session's; the footer shows it.
 

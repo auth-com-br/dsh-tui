@@ -60,3 +60,27 @@ describe('approvalOutcome', () => {
     }
   });
 });
+
+describe('pickModel and helpText', async () => {
+  const { pickModel, helpText } = await import('../src/ui.js');
+  const models = [
+    { provider: 'bonsai', model: 'Qwen' },
+    { provider: 'a', model: 'same' },
+    { provider: 'b', model: 'same' },
+  ];
+
+  test('provider/model names one model; a model id alone only when one route has it', () => {
+    assert.deepEqual(pickModel(models, 'bonsai/Qwen'), models[0]);
+    assert.deepEqual(pickModel(models, 'Qwen'), models[0]);
+    assert.equal(pickModel(models, 'same'), undefined, 'two routes have it: ambiguous');
+    assert.equal(pickModel(models, 'nothing'), undefined);
+  });
+
+  test('the help lists the harness commands with their input hints', () => {
+    const text = helpText([
+      { name: 'permission', description: 'switch', input: { hint: '<preset>' } },
+    ]);
+    assert.match(text, /harness commands:/);
+    assert.match(text, /\/permission <preset>\s+switch/);
+  });
+});
