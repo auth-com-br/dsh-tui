@@ -313,6 +313,18 @@ async function run(ctx, exit) {
           return commands.execute(agent, line, [], new AbortController().signal);
         },
         listCommands: () => ctx.get('commands')?.list(agent) ?? [],
+        // The skills the user can invoke here, for the `/` menu: what the
+        // web app's skill source lists (skills/list), read from the skill
+        // registry for this directory and agent.
+        listSkills: async () => {
+          const skills = ctx.get('skills');
+          if (skills === undefined) {
+            return [];
+          }
+          return (await skills.list({ cwd, scope: agent }))
+            .filter(s => s.invocation?.userInvocable)
+            .map(s => ({ name: s.name, description: s.description ?? '', kind: 'skill' }));
+        },
         onExit,
         onInterrupt: () => agent.cancel({ kind: 'user' }),
         // /model: the models of every configured route, the current one, and

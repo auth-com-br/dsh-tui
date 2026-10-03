@@ -24,6 +24,7 @@ import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
 import { newQuestions, questionKey, questionLines, answersOf } from './questions.js';
 import { whenOf } from './sessions.js';
+import { menuQuery, menuRows, menuLines, pickRow, leadingName } from './slashmenu.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg } from './utils.js';
 
@@ -66,6 +67,16 @@ const TRANSCRIPT_PAD = 2;
 const USER_LINE_PAD = 2;
 const USER_PREFIX_W = 2; // '▌ '
 const MARKDOWN_GUTTER = 2; // '• ' on the first line, '  ' afterwards
+
+/** The TUI's own commands, as the `/` menu offers them. */
+const TUI_COMMANDS = [
+  { name: 'help', description: 'show the commands and keys', kind: 'command' },
+  { name: 'clear', description: 'clear the transcript', kind: 'command' },
+  { name: 'retry', description: 're-send the last message', kind: 'command' },
+  { name: 'model', description: 'choose the model', kind: 'command' },
+  { name: 'sessions', description: 'resume another session of this directory', kind: 'command' },
+  { name: 'exit', description: 'quit', kind: 'command' },
+];
 
 const HELP_TEXT = [
   'commands:',
@@ -736,6 +747,7 @@ export function App({
   selectModel,
   listSessions,
   switchSession,
+  listSkills,
   history = [],
   onExit,
   onInterrupt,
@@ -761,6 +773,15 @@ export function App({
   // Batches of questions the agent asked, oldest first; the first is being
   // answered, its state in `state` and its waiting request's resolve.
   const [asks, setAsks] = useState([]);
+  // The `/` menu: its cursor, the line it was closed on with esc (it stays
+  // closed until the line changes), and the skills it offers, read once on
+  // the first `/`. inputKey remounts the composer when the menu completes
+  // the line, so its cursor lands at the end — ink-text-input keeps its own
+  // cursor and leaves it where it was on a value changed from outside.
+  const [menuCursor, setMenuCursor] = useState(0);
+  const [menuClosedFor, setMenuClosedFor] = useState(null);
+  const [skills, setSkills] = useState(undefined);
+  const [inputKey, setInputKey] = useState(0);
   const viewportStep = useRef(5);
   const [, setTick] = useState(0); // drives the Working elapsed timer
   const usageRef = useRef(null);
@@ -837,6 +858,57 @@ export function App({
     });
   }, []);
 
+  // The `/` menu, open while the composer holds a single `/word` and the
+  // composer is shown. The skills are asked for once, on the first `/`.
+  const composerText = useRef('');
+  composerText.current = input;
+  const handleSubmitRef = useRef(undefined);
+  const query = approvals.length === 0 && asks.length === 0 ? menuQuery(input) : undefined;
+  useEffect(() => {
+    if (query === undefined || skills !== undefined) {
+      return;
+    }
+    setSkills([]);
+    if (typeof listSkills === 'function') {
+      Promise.resolve(listSkills()).then(
+        list => setSkills(list),
+        () => {},
+      );
+    }
+  }, [query, skills, listSkills]);
+  const menu =
+    query === undefined || menuClosedFor === input
+      ? []
+      : menuRows(
+          {
+            commands: [
+              ...TUI_COMMANDS,
+              ...(typeof listCommands === 'function' ? listCommands() : []).map(c => ({
+                name: c.name,
+                description: c.description,
+                kind: 'command',
+                takesInput: c.input !== undefined,
+                hint: c.input?.hint,
+              })),
+            ],
+            skills: skills ?? [],
+          },
+          query,
+        );
+  const cursor = Math.min(menuCursor, Math.max(0, menu.length - 1));
+  useEffect(() => {
+    setMenuCursor(0);
+  }, [query]);
+  const pickFromMenu = row => {
+    const pick = pickRow(row);
+    if ('insert' in pick) {
+      setInput(pick.insert);
+      setInputKey(k => k + 1);
+    } else {
+      handleSubmitRef.current(pick.run);
+    }
+  };
+
   // Global keys: esc interrupts the live turn, ctrl + t toggles thinking,
   // ctrl + c quits. Bare letters never hijack typing — except while an
   // approval is asked, when the composer is not there to type into and y,
@@ -862,6 +934,25 @@ export function App({
         answerApproval(outcome);
       }
       return;
+    }
+    if (menu.length > 0 && !key.ctrl) {
+      if (key.upArrow) {
+        setMenuCursor((cursor - 1 + menu.length) % menu.length);
+        return;
+      }
+      if (key.downArrow) {
+        setMenuCursor((cursor + 1) % menu.length);
+        return;
+      }
+      if (key.tab) {
+        setInput(`/${menu[cursor].name} `);
+        setInputKey(k => k + 1);
+        return;
+      }
+      if (key.escape) {
+        setMenuClosedFor(composerText.current);
+        return;
+      }
     }
     if (key.ctrl && input === 'c') {
       handleExit();
@@ -1347,8 +1438,14 @@ export function App({
       }
       // Any other /command is the harness's (dsh-commands): it runs against
       // the agent, never as a model message — a line naming no command is
-      // said so rather than sent to the model.
-      if (text.startsWith('/') && typeof runCommand === 'function') {
+      // said so rather than sent to the model. A line led by a skill's name
+      // is a message: the harness loads the skill from that token
+      // (dsh-tool-skill).
+      if (
+        text.startsWith('/') &&
+        !(skills ?? []).some(s => s.name === leadingName(text)) &&
+        typeof runCommand === 'function'
+      ) {
         setInput('');
         void Promise.resolve(runCommand(text)).then(
           execution => {
@@ -1384,16 +1481,37 @@ export function App({
       showBusyHint,
       flashHint,
       runCommand,
+      skills,
       listCommands,
       listModels,
       currentModel,
       selectModel,
     ],
   );
+  handleSubmitRef.current = handleSubmit;
+
+  // The lines in the composer's place beyond its own: the `/` menu above
+  // it, or an approval or a question shown instead of it.
+  const menuShown = menuLines(menu, cursor, width);
+  const composerExtra =
+    approvals.length > 0
+      ? approvalLines(approvals[0], width).length - 1
+      : asks.length > 0
+        ? questionLines(asks[0].state, width).length - 1
+        : menuShown.length;
 
   // ── Viewport: keep the transcript tail visible (bottom-anchored), with
   // line-based scrolling on top (scrollLines = lines offset from the bottom).
-  const viewport = computeViewport({ items, rows, width, scrollLines, busy, todos, thinkingOpen });
+  const viewport = computeViewport({
+    items,
+    rows,
+    width,
+    scrollLines,
+    busy,
+    todos,
+    thinkingOpen,
+    composerExtra,
+  });
   const { visible, scrollLines: clampedLines, atBottom, step, overflowTop } = viewport;
   useEffect(() => {
     viewportStep.current = step;
@@ -1557,14 +1675,34 @@ export function App({
           )
         : el(
             Box,
-            { paddingLeft: 1, paddingRight: 1, flexDirection: 'row' },
-            el(Text, { bold: true, color: ACCENT }, '❯ '),
-            el(TextInput, {
-              value: input,
-              onChange: setInput,
-              onSubmit: handleSubmit,
-              placeholder: 'Ask anything',
-            }),
+            { flexDirection: 'column' },
+            ...menuShown.map((line, i) =>
+              el(
+                Box,
+                { key: `m${i}`, paddingLeft: 1, paddingRight: 1 },
+                el(
+                  Text,
+                  line.selected ? { bold: true, color: ACCENT } : { dimColor: line.dim === true },
+                  line.text,
+                ),
+              ),
+            ),
+            el(
+              Box,
+              { key: 'composer', paddingLeft: 1, paddingRight: 1, flexDirection: 'row' },
+              el(Text, { bold: true, color: ACCENT }, '❯ '),
+              el(TextInput, {
+                key: inputKey,
+                value: input,
+                onChange: setInput,
+                // enter on an open menu picks its row: a bare command runs,
+                // one taking an argument or a skill is completed to be
+                // finished.
+                onSubmit: value =>
+                  menu.length > 0 ? pickFromMenu(menu[cursor]) : handleSubmit(value),
+                placeholder: 'Ask anything',
+              }),
+            ),
           );
 
   const hintLeft = `  ${modelLabel} · ${shortCwd}`;
@@ -1688,12 +1826,14 @@ export function computeViewport({
   busy,
   todos = [],
   thinkingOpen = true,
+  composerExtra = 0,
 }) {
   const heights = items.map(item => estimateItemLines(item, width, thinkingOpen));
   const totalLines = heights.reduce((a, b) => a + b, 0);
   // Chrome rows: status row (busy) + scroll hint + composer + footer +
-  // empty-state banner + todo panel.
+  // empty-state banner + todo panel, and whatever the composer grew by.
   const chromeLines =
+    composerExtra +
     (busy ? 1 : 0) +
     (scrollLines > 0 ? 1 : 0) +
     2 +

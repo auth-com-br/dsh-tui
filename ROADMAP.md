@@ -44,8 +44,10 @@ Each phase is usable on its own. Order is by what blocks real work first.
       this directory's and resumes one with its history; `--resume <id>`
       and `-c` from the command line (tend's "continue in…"). Rename and
       delete are still to do.
-- [ ] **`/` commands and skills** (`commands`, `skill`, `input-trigger`): a
-      menu as `/` is typed, the skills among them.
+- [x] **`/` commands and skills** (`commands`, `skill`, `input-trigger`): a
+      menu as `/` is typed — the TUI's commands, the harness's and the
+      skills — ranked as the web app ranks them; a skill picked goes in the
+      message and the harness loads it.
 - [ ] **`@` references** (`reference`): files and sessions, completed as
       typed.
 - [ ] **Plan mode and goal** (`plan`, `goal`): the plan chip, the session's
