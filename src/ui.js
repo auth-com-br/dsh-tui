@@ -79,6 +79,7 @@ const TUI_COMMANDS = [
   { name: 'model', description: 'choose the model', kind: 'command' },
   { name: 'sessions', description: 'resume another session of this directory', kind: 'command' },
   { name: 'mcp', description: 'the MCP servers and their tools', kind: 'command' },
+  { name: 'agents', description: "watch this session's subagents", kind: 'command' },
   {
     name: 'rename',
     description: 'rename this session',
@@ -97,6 +98,7 @@ const HELP_TEXT = [
   '  /model [name]  choose the model (provider/model)',
   '  /sessions     resume another session of this directory',
   '  /mcp          the MCP servers and their tools',
+  "  /agents       watch this session's subagents (read-only)",
   '  /rename <title>  rename this session',
   '  @path         refer to a file or folder; @ also lists other sessions',
   '  /exit, /quit  quit dsh tui',
@@ -765,6 +767,11 @@ export function App({
   mcpStatus,
   renameSession,
   listRefs,
+  listAgents,
+  openAgent,
+  viewer,
+  onBack,
+  replayNote = 'resumed',
   history = [],
   onExit,
   onInterrupt,
@@ -1006,6 +1013,12 @@ export function App({
       if (outcome !== null) {
         answerApproval(outcome);
       }
+      return;
+    }
+    // Watching a subagent: esc goes back to the session; the rest of the
+    // keys scroll as anywhere.
+    if (viewer !== undefined && key.escape) {
+      onBack?.();
       return;
     }
     if (menu.length > 0 && !key.ctrl) {
@@ -1281,11 +1294,18 @@ export function App({
       handleEvent(event);
     }
     replaying.current = false;
-    setBusy(false);
-    setStream({ reasoning: '', text: '', tool: null });
+    // A turn the past ends inside is still running — a subagent being
+    // watched, or this session's own turn while a subagent was on screen —
+    // and its next events arrive live.
+    const lastStart = history.findLastIndex(e => e.type === 'turn/start');
+    const running = lastStart > history.findLastIndex(e => e.type === 'turn/end');
+    setBusy(running);
+    if (!running) {
+      setStream({ reasoning: '', text: '', tool: null });
+    }
     pushItem({
       kind: 'status',
-      text: `resumed · ${history.filter(e => e.type === 'turn/end').length} turns`,
+      text: `${replayNote} · ${history.filter(e => e.type === 'turn/end').length} turns`,
     });
   }, []); // once, on mount: the past does not change
 
@@ -1426,6 +1446,54 @@ export function App({
             error: true,
           });
         }
+        return;
+      }
+      // The subagents this session started, at every depth (the web app's
+      // descendant catalog): one picked is shown read-only, live while it
+      // runs, and esc comes back.
+      if (text === '/agents') {
+        setInput('');
+        if (typeof listAgents !== 'function') {
+          pushItem({ kind: 'status', text: 'no subagent support here' });
+          return;
+        }
+        void Promise.resolve(listAgents()).then(
+          rows => {
+            if (rows.length === 0) {
+              pushItem({ kind: 'status', text: 'this session has started no subagents' });
+              return;
+            }
+            const entry = {
+              state: newQuestions([
+                {
+                  id: 'agent',
+                  question: 'Subagent to watch (read-only; esc there comes back)',
+                  options: rows.map(r => ({ label: r.label, description: r.description })),
+                },
+              ]),
+              resolve: answer => {
+                const picked = answer.answers[0]?.selected?.[0];
+                const row = rows.find(r => r.label === picked);
+                if (row !== undefined && row.id !== undefined) {
+                  void Promise.resolve(openAgent(row.id, row)).catch(error =>
+                    pushItem({
+                      kind: 'status',
+                      text: `✗ ${error instanceof Error ? error.message : String(error)}`,
+                      error: true,
+                    }),
+                  );
+                }
+              },
+            };
+            setAsks(prev => [...prev, entry]);
+          },
+          error =>
+            pushItem({
+              kind: 'status',
+              text: `✗ ${error instanceof Error ? error.message : String(error)}`,
+              error: true,
+            }),
+        );
         return;
       }
       if (text === '/mcp') {
@@ -1598,6 +1666,8 @@ export function App({
       skills,
       mcpStatus,
       renameSession,
+      listAgents,
+      openAgent,
       listCommands,
       listModels,
       currentModel,
@@ -1749,7 +1819,7 @@ export function App({
             ]
           : []),
         el(Box, { flexGrow: 1 }),
-        el(Text, { dimColor: true }, 'esc interrupt'),
+        el(Text, { dimColor: true }, viewer !== undefined ? 'esc back' : 'esc interrupt'),
       )
     : null;
 
@@ -1770,57 +1840,67 @@ export function App({
     keys: { dimColor: true },
   };
   const inputRow =
-    approvals.length === 0 && asks.length > 0
+    viewer !== undefined && approvals.length === 0 && asks.length === 0
       ? el(
           Box,
-          { paddingLeft: 1, paddingRight: 1, flexDirection: 'column' },
-          ...questionLines(asks[0].state, width).map((line, i) =>
-            el(Text, { key: i, ...questionStyle[line.style] }, line.text),
+          { paddingLeft: 1, paddingRight: 1 },
+          el(
+            Text,
+            { color: ACCENT },
+            `◂ subagent ${viewer.label} · ${[viewer.mode, busy ? 'running' : 'done'].filter(Boolean).join(' · ')} · read-only — esc goes back`,
           ),
         )
-      : approvals.length > 0
+      : approvals.length === 0 && asks.length > 0
         ? el(
             Box,
             { paddingLeft: 1, paddingRight: 1, flexDirection: 'column' },
-            ...approvalLines(approvals[0], width).map((line, i) =>
-              el(
-                Text,
-                i === 0 ? { key: i, bold: true, color: 'yellow' } : { key: i, dimColor: i > 0 },
-                line,
-              ),
+            ...questionLines(asks[0].state, width).map((line, i) =>
+              el(Text, { key: i, ...questionStyle[line.style] }, line.text),
             ),
           )
-        : el(
-            Box,
-            { flexDirection: 'column' },
-            ...menuShown.map((line, i) =>
-              el(
-                Box,
-                { key: `m${i}`, paddingLeft: 1, paddingRight: 1 },
+        : approvals.length > 0
+          ? el(
+              Box,
+              { paddingLeft: 1, paddingRight: 1, flexDirection: 'column' },
+              ...approvalLines(approvals[0], width).map((line, i) =>
                 el(
                   Text,
-                  line.selected ? { bold: true, color: ACCENT } : { dimColor: line.dim === true },
-                  line.text,
+                  i === 0 ? { key: i, bold: true, color: 'yellow' } : { key: i, dimColor: i > 0 },
+                  line,
                 ),
               ),
-            ),
-            el(
+            )
+          : el(
               Box,
-              { key: 'composer', paddingLeft: 1, paddingRight: 1, flexDirection: 'row' },
-              el(Text, { bold: true, color: ACCENT }, '❯ '),
-              el(TextInput, {
-                key: inputKey,
-                value: input,
-                onChange: setInput,
-                // enter on an open menu picks its row: a bare command runs,
-                // one taking an argument or a skill is completed to be
-                // finished.
-                onSubmit: value =>
-                  menu.length > 0 ? pickFromMenu(menu[cursor]) : handleSubmit(value),
-                placeholder: 'Ask anything',
-              }),
-            ),
-          );
+              { flexDirection: 'column' },
+              ...menuShown.map((line, i) =>
+                el(
+                  Box,
+                  { key: `m${i}`, paddingLeft: 1, paddingRight: 1 },
+                  el(
+                    Text,
+                    line.selected ? { bold: true, color: ACCENT } : { dimColor: line.dim === true },
+                    line.text,
+                  ),
+                ),
+              ),
+              el(
+                Box,
+                { key: 'composer', paddingLeft: 1, paddingRight: 1, flexDirection: 'row' },
+                el(Text, { bold: true, color: ACCENT }, '❯ '),
+                el(TextInput, {
+                  key: inputKey,
+                  value: input,
+                  onChange: setInput,
+                  // enter on an open menu picks its row: a bare command runs,
+                  // one taking an argument or a skill is completed to be
+                  // finished.
+                  onSubmit: value =>
+                    menu.length > 0 ? pickFromMenu(menu[cursor]) : handleSubmit(value),
+                  placeholder: 'Ask anything',
+                }),
+              ),
+            );
 
   const hintLeft = `  ${modelLabel} · ${shortCwd}`;
   const hintRightParts = [];

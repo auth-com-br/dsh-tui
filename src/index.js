@@ -23,6 +23,7 @@ import {
   whenOf,
 } from './sessions.js';
 import { refRows } from './refs.js';
+import { agentRows } from './agents.js';
 import { configuredServers, toolsByServer, mcpText } from './mcp.js';
 
 /** Stable Cordis plugin name (bundle row id: tui-runner). */
@@ -200,6 +201,14 @@ async function run(ctx, exit) {
   // Live append feed: forward this session's events to the UI and persist the
   // log at each turn boundary (fire-and-forget; flush is caller-owned).
   ctx.on('session/event', (session, event) => {
+    // A subagent on screen (/agents) gets its own events; the session's are
+    // still flushed, and shown again from its log on the way back.
+    if (viewing !== undefined && session.id === viewing.id) {
+      if (event.seq >= viewing.firstSeq) {
+        forward(event);
+      }
+      return;
+    }
     if (current.agent === undefined || session.id !== current.agent.session.id) {
       return;
     }
@@ -218,10 +227,16 @@ async function run(ctx, exit) {
         scheduleFlush();
       }
     }
-    forward(event);
+    if (viewing === undefined) {
+      forward(event);
+    }
   });
 
   let app;
+  // The subagent shown instead of the session, while one is: its id, the
+  // first sequence its live events start at, and how it is labelled.
+  let viewing = undefined;
+  let mounts = 0;
   let exited = false;
   const onExit = () => {
     if (exited) {
@@ -319,12 +334,65 @@ async function run(ctx, exit) {
     return titles.get(id);
   };
 
+  /**
+   * Show a subagent: its past from the live session when it is live (its
+   * own events — a fork's inherited prefix is the parent's), else from
+   * disk; then its live events as they come.
+   * @param {string} id
+   * @param {{label: string, mode?: string}} row
+   */
+  const openAgent = async (id, row) => {
+    const live = sessions.get(SessionId(id));
+    let history;
+    let firstSeq;
+    if (live !== undefined) {
+      history = live.ownEvents();
+      firstSeq = live.seq;
+    } else {
+      const loaded = await persistence.load(id);
+      history = loaded.events.slice(loaded.header?.inheritedEventCount ?? 0);
+      firstSeq = Number.MAX_SAFE_INTEGER;
+    }
+    viewing = { id, firstSeq };
+    app.unmount();
+    mount({
+      history,
+      firstSeq,
+      viewer: { label: row.label.trim(), mode: row.mode },
+      replayNote: 'subagent',
+    });
+  };
+
+  /** Back from a subagent to the session, its log shown up to now. */
+  const closeAgent = () => {
+    viewing = undefined;
+    const now = current.agent.session.seq;
+    app.unmount();
+    mount({
+      history: current.agent.session.snapshotEvents(0, now),
+      firstSeq: now,
+      replayNote: 'back',
+    });
+  };
+
   // exitOnCtrlC: false — the App owns Ctrl-C so it can exit the harness cleanly.
-  const mount = () => {
+  const mount = (view = undefined) => {
     const { agent, firstSeq, selected, resumed } = current;
+    mounts++;
     app = render(
       React.createElement(App, {
-        key: agent.session.id,
+        key: `${agent.session.id}:${mounts}`,
+        viewer: view?.viewer,
+        onBack: closeAgent,
+        replayNote: view?.replayNote ?? 'resumed',
+        listAgents: async () => {
+          const subagents = ctx.get('subagents');
+          if (subagents === undefined) {
+            return [];
+          }
+          return agentRows(await subagents.listDescendants(agent.session.id));
+        },
+        openAgent,
         // A function, not the agent: React's development build walks a
         // component's props to log them, and the agent is a Cordis object
         // that throws on any property it was not given ("cannot get
@@ -459,8 +527,8 @@ async function run(ctx, exit) {
         switchSession: switchTo,
         // A resumed session's past, replayed onto the screen; a new one has
         // only its construction seed, which is not chat.
-        history: resumed ? agent.session.snapshotEvents(0, firstSeq) : [],
-        firstSeq,
+        history: view?.history ?? (resumed ? agent.session.snapshotEvents(0, firstSeq) : []),
+        firstSeq: view?.firstSeq ?? firstSeq,
         model: selected.current?.model ?? '?',
         themeBg,
       }),

@@ -65,8 +65,9 @@ Each phase is usable on its own. Order is by what blocks real work first.
 
 ## Phase 3 — the agent's wider work
 
-- [ ] **Subagents** (`subagent`): their conversations, opened from the
-      session.
+- [x] **Subagents** (`subagent`): `/agents` lists the session's subagent
+      tree; one picked is shown read-only, live while it runs, and esc
+      comes back. Writing to a continuable one is still to do.
 - [ ] **Jobs and schedules** (`jobs`, `schedule`): background jobs and
       reminders of the session.
 - [ ] **Workflow runs** (`workflow-run`).
