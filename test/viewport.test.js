@@ -146,6 +146,55 @@ describe('computeViewport', () => {
     assert.ok(v.step >= 4);
   });
 
+  test('a message taller than the screen is shown, not skipped, with short rows after it', () => {
+    // A 200-line analysis followed by the turn's short status rows: every
+    // row above the status used to be dropped because the long message
+    // never fit whole, which left a blank screen after a long answer.
+    const long = {
+      kind: 'assistant',
+      text: Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n'),
+    };
+    const items = [
+      { kind: 'user', text: 'analyse it' },
+      long,
+      { kind: 'divider' },
+      { kind: 'status', text: '✓ completed' },
+    ];
+    const v = computeViewport({ ...BASE, items, scrollLines: 0 });
+    assert.ok(v.visible.includes(long), 'the long message is in view');
+    assert.equal(v.overflowTop, true, 'its head is the part cut off, so its end shows');
+  });
+
+  test('a message taller than the screen alone at the bottom shows its end', () => {
+    const long = {
+      kind: 'assistant',
+      text: Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n'),
+    };
+    const v = computeViewport({ ...BASE, items: [long], scrollLines: 0 });
+    assert.deepEqual(v.visible, [long]);
+    assert.equal(v.overflowTop, true);
+  });
+
+  test('scrolled up into a message taller than the screen, its head shows', () => {
+    const long = {
+      kind: 'assistant',
+      text: Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n'),
+    };
+    const items = [
+      { kind: 'user', text: 'analyse it' },
+      long,
+      { kind: 'status', text: '✓ completed' },
+    ];
+    const v = computeViewport({ ...BASE, items, scrollLines: 40 });
+    assert.ok(v.visible.includes(long));
+    assert.equal(v.overflowTop, false, 'laid out from the top, so the head is in view');
+  });
+
+  test('messages that fit are not marked as overflowing', () => {
+    const v = computeViewport({ ...BASE, items: mkItems(3), scrollLines: 0 });
+    assert.equal(v.overflowTop, false);
+  });
+
   test('todos and busy chrome never grow the visible slice', () => {
     const items = mkItems(200);
     const plain = computeViewport({ ...BASE, items, scrollLines: 0 });

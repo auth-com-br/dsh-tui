@@ -1034,7 +1034,7 @@ export function App({
   // ── Viewport: keep the transcript tail visible (bottom-anchored), with
   // line-based scrolling on top (scrollLines = lines offset from the bottom).
   const viewport = computeViewport({ items, rows, width, scrollLines, busy, todos, thinkingOpen });
-  const { visible, scrollLines: clampedLines, atBottom, step } = viewport;
+  const { visible, scrollLines: clampedLines, atBottom, step, overflowTop } = viewport;
   useEffect(() => {
     viewportStep.current = step;
   }, [step]);
@@ -1196,7 +1196,19 @@ export function App({
   return el(
     Box,
     { flexDirection: 'column', height: '100%' },
-    el(Box, { flexGrow: 1, flexDirection: 'column', overflow: 'hidden' }, transcript),
+    el(
+      Box,
+      {
+        flexGrow: 1,
+        flexDirection: 'column',
+        overflow: 'hidden',
+        // Laid out from the bottom while the top item overflows, so the
+        // rendered height — not the estimate — decides what is cut, and it
+        // is the head of the long message rather than its end.
+        justifyContent: overflowTop ? 'flex-end' : 'flex-start',
+      },
+      transcript,
+    ),
     statusRow,
     scrollHint,
     inputRow,
@@ -1303,6 +1315,10 @@ export function computeViewport({
   const lines = Math.min(Math.max(0, scrollLines), maxScroll);
 
   let visible = [];
+  // overflowTop: the topmost visible item is taller than the room left for
+  // it, and its end is what belongs in view — the transcript is then laid
+  // out from the bottom so the head is the part cut off.
+  let overflowTop = false;
   if (items.length > 0) {
     // Window bottom = the item that contains the `lines`-th line from bottom.
     let endIdx = items.length - 1;
@@ -1322,6 +1338,16 @@ export function computeViewport({
     let total = 0;
     for (let i = endIdx; i >= 0; i--) {
       if (total + heights[i] > available) {
+        // An item that cannot fit whole is still shown, its head cut off,
+        // when there is room left for any of it. Skipping it left only the
+        // short rows below it — a long answer followed by its status row
+        // drew a blank screen. Scrolled into the item itself (the window
+        // bottom above its last line), its head shows as before.
+        const scrolledInto = i === endIdx && lines > consumed;
+        if (total < available && !scrolledInto) {
+          startIdx = i;
+          overflowTop = true;
+        }
         break;
       }
       total += heights[i];
@@ -1335,6 +1361,7 @@ export function computeViewport({
     maxScroll,
     atBottom: lines === 0,
     atTop: lines >= maxScroll,
+    overflowTop,
     step: Math.max(4, Math.floor(available / 2)),
   };
 }
