@@ -1,5 +1,10 @@
 # deepseek-harness-tui
 
+> **This fork** — maintained by Auth Tecnologia as the base of a complete terminal
+> interface for the DeepSeek Harness: see [ROADMAP.md](ROADMAP.md). Originally
+> written by [gxinxing](https://github.com/gxinxing/deepseek-harness-tui), MIT;
+> the name is provisional.
+
 **An interactive terminal chat for DeepSeek Harness — terminal-native style, built with Ink (React for terminals).**
 
 Give it a TokenDance key and a `dsh` install; run `dsh --profile tui` and you get a zero-chrome terminal chat with DeepSeek models: bottom-anchored transcript, tool calls folded into cells, thinking folding, and a theme that adapts to your terminal via OSC 11. It's a thin, readable plugin (~800 lines of UI) — not a re-implementation of the harness.
