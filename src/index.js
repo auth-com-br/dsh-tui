@@ -38,6 +38,18 @@ function forward(eventOrHandler) {
 }
 
 /**
+ * Bridge for approvals, as `forward` is for events: the App installs the
+ * function that asks the user, and the harness's approval requests for this
+ * TUI's agent are handed to it. Until the App mounts — or after it unmounts —
+ * a request is passed on (`next()`), so the harness fails closed as it does
+ * with no answerer at all.
+ */
+let approvalHandler = undefined;
+function onApproval(handler) {
+  approvalHandler = typeof handler === 'function' ? handler : undefined;
+}
+
+/**
  * Mount the interactive chat driver.
  * @param ctx - plugin context carrying core services and the launcher-provided exit.
  */
@@ -165,11 +177,26 @@ async function run(ctx, exit) {
     }, 2000);
   };
 
+  // The answerer for this agent's approval requests (dsh-user-approval):
+  // with a session policy of `ask`, an action outside the workspace or
+  // needing more access is put to the composed answerers, and with none
+  // the request fails closed — which, before this, left the terminal with
+  // no way to allow anything ("no approval channel is available"). Requests
+  // for other agents (subagents have their own) are passed on. The outcomes
+  // the service accepts are allowed-once, rejected and cancelled.
+  ctx.on('approval/request', (request, next) => {
+    if (request.agent !== agent || approvalHandler === undefined) {
+      return next();
+    }
+    return approvalHandler(request);
+  });
+
   // exitOnCtrlC: false — the App owns Ctrl-C so it can exit the harness cleanly.
   app = render(
     React.createElement(App, {
       agent,
       onEvent: forward,
+      onApproval,
       onExit,
       onInterrupt: () => agent.cancel({ kind: 'user' }),
       onModelSwitch: newModel => {

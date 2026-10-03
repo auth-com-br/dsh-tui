@@ -24,7 +24,7 @@ Each phase is usable on its own. Order is by what blocks real work first.
 
 ## Phase 1 — able to work (blocks real use)
 
-- [ ] **Approvals** (`dsh-client-ui-approval`). The sessions run with
+- [x] **Approvals** (`dsh-client-ui-approval`). The sessions run with
       `approval/policy: ask`, and with no approval surface the harness fails
       closed: anything outside the workspace or needing more access is
       impossible ("no approval channel is available"). A prompt in place of

@@ -644,11 +644,54 @@ function TodoPanel({ todos }) {
   );
 }
 
+// ── Approvals ─────────────────────────────────────────────────────────────
+
+/**
+ * The lines an approval prompt shows in place of the composer: what is
+ * asked, the action itself (the tool call's arguments, already streamed
+ * into its cell), why, and the keys. The first line carries the words
+ * "approval needed", which tend reads to show the harness as waiting.
+ * @param {{toolName: string, args?: string, reason?: string}} req
+ * @param {number} width
+ * @returns {string[]}
+ */
+export function approvalLines(req, width) {
+  const w = Math.max(20, width - 4);
+  const lines = [`▲ approval needed · ${req.toolName}`];
+  if (req.args) {
+    lines.push(`  ${truncate(req.args.replace(/\s+/g, ' '), w - 2)}`);
+  }
+  if (req.reason) {
+    lines.push(`  ${truncate(req.reason.replace(/\s+/g, ' '), w - 2)}`);
+  }
+  lines.push('  y allow once · n reject · esc reject');
+  return lines;
+}
+
+/**
+ * The outcome a key gives a pending approval, or null for a key that does
+ * not answer it: y allows this one action, n and esc reject it. Nothing is
+ * allowed by a key that was meant for something else, so only y allows.
+ * @param {string} input
+ * @param {{escape?: boolean}} key
+ * @returns {'allowed-once' | 'rejected' | null}
+ */
+export function approvalOutcome(input, key) {
+  if (input === 'y' || input === 'Y') {
+    return 'allowed-once';
+  }
+  if (input === 'n' || input === 'N' || key.escape) {
+    return 'rejected';
+  }
+  return null;
+}
+
 // ── App ───────────────────────────────────────────────────────────────────
 
 export function App({
   agent,
   onEvent,
+  onApproval,
   onExit,
   onInterrupt,
   firstSeq = 0,
@@ -663,6 +706,9 @@ export function App({
   const [hint, setHint] = useState(null);
   const [thinkingOpen, setThinkingOpen] = useState(true);
   const [scrollLines, setScrollLines] = useState(0);
+  // Approval requests waiting for the user, oldest first: the first is the
+  // one shown. Each carries the resolve of the harness's waiting request.
+  const [approvals, setApprovals] = useState([]);
   const viewportStep = useRef(5);
   const [, setTick] = useState(0); // drives the Working elapsed timer
   const usageRef = useRef(null);
@@ -725,9 +771,32 @@ export function App({
     onExit();
   }, [inkExit, onExit]);
 
+  /**
+   * Answer the oldest pending approval and drop it from the queue.
+   * @param {'allowed-once' | 'rejected' | 'cancelled'} outcome
+   */
+  const answerApproval = useCallback(outcome => {
+    setApprovals(prev => {
+      if (prev.length === 0) {
+        return prev;
+      }
+      prev[0].resolve(outcome);
+      return prev.slice(1);
+    });
+  }, []);
+
   // Global keys: esc interrupts the live turn, ctrl + t toggles thinking,
-  // ctrl + c quits. Bare letters never hijack typing.
+  // ctrl + c quits. Bare letters never hijack typing — except while an
+  // approval is asked, when the composer is not there to type into and y,
+  // n and esc answer it.
   useInput((input, key) => {
+    if (approvals.length > 0 && !(key.ctrl && input === 'c')) {
+      const outcome = approvalOutcome(input, key);
+      if (outcome !== null) {
+        answerApproval(outcome);
+      }
+      return;
+    }
     if (key.ctrl && input === 'c') {
       handleExit();
     } else if (key.escape && busy && typeof onInterrupt === 'function') {
@@ -944,6 +1013,44 @@ export function App({
     onEvent(handleEvent);
     return () => onEvent(null);
   }, [onEvent, handleEvent]);
+
+  // The harness's approval requests for this agent (index.js): each waits
+  // for the user's answer. A request the harness withdraws (its signal
+  // aborts: the turn was cancelled) leaves the prompt and settles itself.
+  useEffect(() => {
+    if (typeof onApproval !== 'function') {
+      return undefined;
+    }
+    onApproval(
+      request =>
+        new Promise(resolve => {
+          const tool =
+            request.callId !== undefined ? runningTools.current.get(request.callId) : undefined;
+          const entry = {
+            toolName: request.toolName,
+            args: tool?.args ?? '',
+            reason: request.reason,
+            resolve,
+          };
+          if (request.signal) {
+            if (request.signal.aborted) {
+              resolve('cancelled');
+              return;
+            }
+            request.signal.addEventListener(
+              'abort',
+              () => {
+                setApprovals(prev => prev.filter(a => a !== entry));
+                resolve('cancelled');
+              },
+              { once: true },
+            );
+          }
+          setApprovals(prev => [...prev, entry]);
+        }),
+    );
+    return () => onApproval(null);
+  }, [onApproval]);
 
   const send = useCallback(
     text => {
@@ -1166,17 +1273,30 @@ export function App({
       )
     : null;
 
-  const inputRow = el(
-    Box,
-    { paddingLeft: 1, paddingRight: 1, flexDirection: 'row' },
-    el(Text, { bold: true, color: ACCENT }, '❯ '),
-    el(TextInput, {
-      value: input,
-      onChange: setInput,
-      onSubmit: handleSubmit,
-      placeholder: 'Ask anything',
-    }),
-  );
+  const inputRow =
+    approvals.length > 0
+      ? el(
+          Box,
+          { paddingLeft: 1, paddingRight: 1, flexDirection: 'column' },
+          ...approvalLines(approvals[0], width).map((line, i) =>
+            el(
+              Text,
+              i === 0 ? { key: i, bold: true, color: 'yellow' } : { key: i, dimColor: i > 0 },
+              line,
+            ),
+          ),
+        )
+      : el(
+          Box,
+          { paddingLeft: 1, paddingRight: 1, flexDirection: 'row' },
+          el(Text, { bold: true, color: ACCENT }, '❯ '),
+          el(TextInput, {
+            value: input,
+            onChange: setInput,
+            onSubmit: handleSubmit,
+            placeholder: 'Ask anything',
+          }),
+        );
 
   const hintLeft = `  ${model} · ${shortCwd}`;
   const hintRightParts = [];
