@@ -40,8 +40,10 @@ Each phase is usable on its own. Order is by what blocks real work first.
 
 ## Phase 2 — sessions and context
 
-- [ ] **Sessions** (`session`, `workspace`, `sidebar`): list, resume, rename,
-      delete; `--resume <id>` from the command line (tend's "continue in…").
+- [x] **Sessions** (`session`, `workspace`, `sidebar`): `/sessions` lists
+      this directory's and resumes one with its history; `--resume <id>`
+      and `-c` from the command line (tend's "continue in…"). Rename and
+      delete are still to do.
 - [ ] **`/` commands and skills** (`commands`, `skill`, `input-trigger`): a
       menu as `/` is typed, the skills among them.
 - [ ] **`@` references** (`reference`): files and sessions, completed as

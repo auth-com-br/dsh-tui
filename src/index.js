@@ -13,12 +13,13 @@ import { render } from 'ink';
 import { installModelSelection } from '@deepseek-ai/dsh-agent';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { App } from './ui.js';
+import { parseArgs, USAGE, listSessions } from './sessions.js';
 
 /** Stable Cordis plugin name (bundle row id: tui-runner). */
 export const name = 'tui-runner';
 
 /** Core services required before the interactive session can start. */
-export const inject = ['agentDefaultModel', 'agents', 'sessions'];
+export const inject = ['agentDefaultModel', 'agents', 'sessions', 'sessionPersistence'];
 
 /**
  * Bridge between the Cordis event bus (non-React) and the Ink tree. The App
@@ -74,6 +75,16 @@ export function apply(ctx) {
 
 /** Create the agent and run the chat until the user quits. */
 async function run(ctx, exit) {
+  // The TUI's own command line, after `dsh --profile tui`: dsh-cmdline
+  // provides it as a holder whose get() is the snapshot, as its own
+  // parseCmdline reads it.
+  const args = parseArgs(ctx.get('cmdlineArgs')?.get?.() ?? []);
+  if (args.help || args.error) {
+    (args.error ? console.error : console.log)(args.error ?? USAGE);
+    exit(args.error ? 2 : 0);
+    return;
+  }
+
   // Probe the terminal background BEFORE Ink mounts: Ink's key parser would
   // otherwise read the OSC 11 response as keystrokes and type garbage.
   const themeBg = await probeTerminalBg();
@@ -89,24 +100,67 @@ async function run(ctx, exit) {
   if (agents === undefined || defaultModel === undefined || sessions === undefined) {
     return;
   }
+  const persistence = ctx.get('sessionPersistence');
+  const cwd = process.cwd();
 
-  // Create the agent exactly like the headless runner does.
-  const selection = defaultModel.currentSelection();
-  // The agent's model, read by the harness at each step (installModelSelection):
-  // /model switches it by replacing `current`, which takes effect on the next
-  // step rather than splitting one in flight.
-  const selected = { current: selection, assembled: undefined };
-  const { agent } = await agents.create({
-    sessionId: SessionId(`session-${randomUUID()}`),
-    meta: { cwd: process.cwd() },
-    agentOptions: { provider: selection.provider, model: selection.model },
-    setup: agentCtx => {
-      installModelSelection(agentCtx, selected);
-    },
-  });
-  await agent.whenIdle();
-  // Events below this seq are construction seed history, not chat.
-  const firstSeq = agent.session.seq;
+  // The session on screen. /sessions replaces it — the old agent's log is
+  // flushed and the agent disposed, the chosen one resumed — so everything
+  // below reads `current` rather than holding one agent.
+  const current = {
+    handle: undefined,
+    agent: undefined,
+    firstSeq: 0,
+    selected: undefined,
+    resumed: false,
+  };
+
+  /**
+   * Open a session: a new one, or `resumeId`'s from disk (agents.resume, as
+   * the ACP bridge resumes). Its model is the default selection, read by the
+   * harness at each step (installModelSelection): /model switches it by
+   * replacing `current`, which takes effect on the next step.
+   * @param {string | undefined} resumeId
+   */
+  const open = async resumeId => {
+    const selection = defaultModel.currentSelection();
+    const selected = { current: selection, assembled: undefined };
+    const options = {
+      agentOptions: { provider: selection.provider, model: selection.model },
+      setup: agentCtx => {
+        installModelSelection(agentCtx, selected);
+      },
+    };
+    const handle =
+      resumeId === undefined
+        ? await agents.create({
+            sessionId: SessionId(`session-${randomUUID()}`),
+            meta: { cwd },
+            ...options,
+          })
+        : await agents.resume({ resumeSessionId: SessionId(resumeId), ...options });
+    await handle.agent.whenIdle();
+    Object.assign(current, {
+      handle,
+      agent: handle.agent,
+      selected,
+      resumed: resumeId !== undefined,
+      // Events below this seq are construction seed history, not chat — for
+      // a resumed session, its whole past, replayed onto the screen.
+      firstSeq: handle.agent.session.seq,
+    });
+  };
+
+  let resumeId;
+  if (args.resume === true) {
+    const latest = persistence ? await listSessions(persistence, cwd, { limit: 1 }) : [];
+    if (latest.length === 0) {
+      console.error('dsh-tui: no session in this directory to resume');
+    }
+    resumeId = latest[0]?.id;
+  } else if (typeof args.resume === 'string') {
+    resumeId = args.resume;
+  }
+  await open(resumeId);
 
   // Debounced durability flush while a turn is running: a long or stuck turn
   // must be inspectable on disk without waiting for turn/end. The immediate
@@ -121,7 +175,7 @@ async function run(ctx, exit) {
       flushTimer = undefined;
       flushing = true;
       sessions
-        .flush(agent.session)
+        .flush(current.agent.session)
         .catch(error => {
           console.error(
             `dsh-tui: session flush failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -136,12 +190,12 @@ async function run(ctx, exit) {
   // Live append feed: forward this session's events to the UI and persist the
   // log at each turn boundary (fire-and-forget; flush is caller-owned).
   ctx.on('session/event', (session, event) => {
-    if (session.id !== agent.session.id) {
+    if (current.agent === undefined || session.id !== current.agent.session.id) {
       return;
     }
-    if (event.seq >= firstSeq) {
+    if (event.seq >= current.firstSeq) {
       if (event.type === 'turn/end') {
-        void sessions.flush(agent.session).catch(error => {
+        void sessions.flush(current.agent.session).catch(error => {
           console.error(
             `dsh-tui: session flush failed: ${error instanceof Error ? error.message : String(error)}`,
           );
@@ -157,7 +211,7 @@ async function run(ctx, exit) {
     forward(event);
   });
 
-  let app; // eslint-disable-line prefer-const
+  let app;
   let exited = false;
   const onExit = () => {
     if (exited) {
@@ -165,7 +219,7 @@ async function run(ctx, exit) {
     }
     exited = true;
     // Final durability checkpoint before the harness exits.
-    void sessions.flush(agent.session).catch(() => {});
+    void sessions.flush(current.agent.session).catch(() => {});
     if (app) {
       try {
         app.unmount();
@@ -194,7 +248,7 @@ async function run(ctx, exit) {
   // for other agents (subagents have their own) are passed on. The outcomes
   // the service accepts are allowed-once, rejected and cancelled.
   ctx.on('approval/request', (request, next) => {
-    if (request.agent !== agent || approvalHandler === undefined) {
+    if (request.agent !== current.agent || approvalHandler === undefined) {
       return next();
     }
     return approvalHandler(request);
@@ -205,67 +259,107 @@ async function run(ctx, exit) {
   // answerer the ask fails with NO_PROVIDER and the model is told the user
   // could not be asked.
   ctx.on('user-questions/request', (request, next) => {
-    if (request.agent !== agent || questionHandler === undefined) {
+    if (request.agent !== current.agent || questionHandler === undefined) {
       return next();
     }
     return questionHandler(request);
   });
 
+  /**
+   * Switch to another session: the one on screen is flushed and disposed,
+   * the chosen one resumed and shown with its past. A session that cannot be
+   * resumed leaves the old one where it was.
+   * @param {string} id
+   */
+  const switchTo = async id => {
+    const prev = { ...current };
+    const old = current.handle;
+    const oldAgent = current.agent;
+    await sessions.flush(oldAgent.session).catch(() => {});
+    try {
+      await open(id);
+    } catch (error) {
+      Object.assign(current, prev);
+      throw error;
+    }
+    app.unmount();
+    await old.dispose().catch(() => {});
+    mount();
+  };
+
   // exitOnCtrlC: false — the App owns Ctrl-C so it can exit the harness cleanly.
-  app = render(
-    React.createElement(App, {
-      agent,
-      onEvent: forward,
-      onApproval,
-      onQuestion,
-      // The harness's slash commands (dsh-commands): /permission, /goal,
-      // /compact and whatever else the profile composes. They run against
-      // the agent and never become a model message; an unknown or malformed
-      // line returns undefined.
-      runCommand: line => {
-        const commands = ctx.get('commands');
-        if (commands === undefined) {
-          return Promise.resolve(undefined);
-        }
-        return commands.execute(agent, line, [], new AbortController().signal);
-      },
-      listCommands: () => ctx.get('commands')?.list(agent) ?? [],
-      onExit,
-      onInterrupt: () => agent.cancel({ kind: 'user' }),
-      // /model: the models of every configured route, the current one, and
-      // a switch that also becomes the default for later sessions, as the
-      // web app's model selection saves it.
-      listModels: async () => {
-        const llm = ctx.get('llm');
-        if (llm === undefined) {
-          return [];
-        }
-        const out = [];
-        for (const provider of llm.listProviders()) {
-          try {
-            for (const m of await llm.listModels(provider.id)) {
-              out.push({
-                provider: provider.id,
-                providerName: provider.name,
-                model: m.id,
-                name: m.name,
-              });
-            }
-          } catch {
-            // A route that cannot list its models is left out, not fatal.
+  const mount = () => {
+    const { agent, firstSeq, selected, resumed } = current;
+    app = render(
+      React.createElement(App, {
+        key: agent.session.id,
+        // A function, not the agent: React's development build walks a
+        // component's props to log them, and the agent is a Cordis object
+        // that throws on any property it was not given ("cannot get
+        // property $$typeof without inject"), printed at every start.
+        followup: message => agent.followup(message),
+        onEvent: forward,
+        onApproval,
+        onQuestion,
+        // The harness's slash commands (dsh-commands): /permission, /goal,
+        // /compact and whatever else the profile composes. They run against
+        // the agent and never become a model message; an unknown or
+        // malformed line returns undefined.
+        runCommand: line => {
+          const commands = ctx.get('commands');
+          if (commands === undefined) {
+            return Promise.resolve(undefined);
           }
-        }
-        return out;
-      },
-      currentModel: () => selected.current,
-      selectModel: next => {
-        selected.current = { provider: next.provider, model: next.model };
-        void Promise.resolve(defaultModel.saveSelection?.(selected.current)).catch(() => {});
-      },
-      firstSeq,
-      model: selection.model,
-      themeBg,
-    }),
-    { exitOnCtrlC: false },
-  );
+          return commands.execute(agent, line, [], new AbortController().signal);
+        },
+        listCommands: () => ctx.get('commands')?.list(agent) ?? [],
+        onExit,
+        onInterrupt: () => agent.cancel({ kind: 'user' }),
+        // /model: the models of every configured route, the current one, and
+        // a switch that also becomes the default for later sessions, as the
+        // web app's model selection saves it.
+        listModels: async () => {
+          const llm = ctx.get('llm');
+          if (llm === undefined) {
+            return [];
+          }
+          const out = [];
+          for (const provider of llm.listProviders()) {
+            try {
+              for (const m of await llm.listModels(provider.id)) {
+                out.push({
+                  provider: provider.id,
+                  providerName: provider.name,
+                  model: m.id,
+                  name: m.name,
+                });
+              }
+            } catch {
+              // A route that cannot list its models is left out, not fatal.
+            }
+          }
+          return out;
+        },
+        currentModel: () => selected.current,
+        selectModel: next => {
+          selected.current = { provider: next.provider, model: next.model };
+          void Promise.resolve(defaultModel.saveSelection?.(selected.current)).catch(() => {});
+        },
+        // /sessions: this directory's other sessions, and the switch.
+        listSessions: () =>
+          persistence
+            ? listSessions(persistence, cwd, { skip: agent.session.id })
+            : Promise.resolve([]),
+        switchSession: switchTo,
+        // A resumed session's past, replayed onto the screen; a new one has
+        // only its construction seed, which is not chat.
+        history: resumed ? agent.session.snapshotEvents(0, firstSeq) : [],
+        firstSeq,
+        model: selected.current?.model ?? '?',
+        themeBg,
+      }),
+      { exitOnCtrlC: false },
+    );
+  };
+  mount();
 }

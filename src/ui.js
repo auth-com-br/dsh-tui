@@ -23,6 +23,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
 import { newQuestions, questionKey, questionLines, answersOf } from './questions.js';
+import { whenOf } from './sessions.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg } from './utils.js';
 
@@ -72,6 +73,7 @@ const HELP_TEXT = [
   '  /clear        clear the transcript',
   '  /retry        re-send the last message',
   '  /model [name]  choose the model (provider/model)',
+  '  /sessions     resume another session of this directory',
   '  /exit, /quit  quit dsh tui',
   'keys:',
   '  ↑ / ↓          scroll transcript',
@@ -723,7 +725,7 @@ export function approvalOutcome(input, key) {
 // ── App ───────────────────────────────────────────────────────────────────
 
 export function App({
-  agent,
+  followup,
   onEvent,
   onApproval,
   onQuestion,
@@ -732,6 +734,9 @@ export function App({
   listModels,
   currentModel,
   selectModel,
+  listSessions,
+  switchSession,
+  history = [],
   onExit,
   onInterrupt,
   firstSeq = 0,
@@ -751,6 +756,8 @@ export function App({
   const [approvals, setApprovals] = useState([]);
   // The model shown in the footer, which /model changes.
   const [modelLabel, setModelLabel] = useState(model);
+  // Set while a resumed session's past is replayed onto the screen.
+  const replaying = useRef(false);
   // Batches of questions the agent asked, oldest first; the first is being
   // answered, its state in `state` and its waiting request's resolve.
   const [asks, setAsks] = useState([]);
@@ -878,12 +885,26 @@ export function App({
         return;
       }
       lastEventAt.current = Date.now();
-      // Events below the agent's live boundary are seed history, not chat.
-      if (typeof event.seq === 'number' && event.seq < firstSeq) {
+      // Events below the agent's live boundary are seed history, not chat —
+      // except a resumed session's past, which is replayed on purpose.
+      if (!replaying.current && typeof event.seq === 'number' && event.seq < firstSeq) {
         return;
       }
       const data = event.data && typeof event.data === 'object' ? event.data : {};
       switch (event.type) {
+        case 'user/message': {
+          // Live, the user's own message is on screen already (send pushes
+          // it); replaying a resumed session's past, it is drawn from the
+          // log. Messages the harness writes (runtime context, reminders)
+          // are not the user's and are left out.
+          if (replaying.current && data.source?.kind === 'user') {
+            const text = (data.content ?? []).find(c => c.type === 'text')?.text;
+            if (typeof text === 'string' && text.trim() !== '') {
+              pushItem({ kind: 'user', text: text.trim() });
+            }
+          }
+          break;
+        }
         case 'turn/start':
           setBusy(true);
           turnStart.current = Date.now();
@@ -1073,6 +1094,25 @@ export function App({
     return () => onEvent(null);
   }, [onEvent, handleEvent]);
 
+  // A resumed session's past, replayed once through the same handler as live
+  // events, so it is drawn as it was when it happened.
+  useEffect(() => {
+    if (history.length === 0) {
+      return;
+    }
+    replaying.current = true;
+    for (const event of history) {
+      handleEvent(event);
+    }
+    replaying.current = false;
+    setBusy(false);
+    setStream({ reasoning: '', text: '', tool: null });
+    pushItem({
+      kind: 'status',
+      text: `resumed · ${history.filter(e => e.type === 'turn/end').length} turns`,
+    });
+  }, []); // once, on mount: the past does not change
+
   // The harness's approval requests for this agent (index.js): each waits
   // for the user's answer. A request the harness withdraws (its signal
   // aborts: the turn was cancelled) leaves the prompt and settles itself.
@@ -1159,7 +1199,7 @@ export function App({
       pushItem({ kind: 'user', text: value });
       try {
         // Fire-and-forget: session events drive the UI, not this promise.
-        agent.followup(
+        followup(
           createUserMessage({ content: [{ type: 'text', text: value }], source: { kind: 'user' } }),
         );
       } catch (error) {
@@ -1171,7 +1211,7 @@ export function App({
         });
       }
     },
-    [busy, agent, pushItem, showBusyHint],
+    [busy, followup, pushItem, showBusyHint],
   );
 
   const handleSubmit = useCallback(
@@ -1219,6 +1259,42 @@ export function App({
         } else {
           send(lastUserText.current);
         }
+        return;
+      }
+      if (text === '/sessions' && typeof listSessions === 'function') {
+        setInput('');
+        void Promise.resolve(listSessions()).then(list => {
+          if (list.length === 0) {
+            pushItem({ kind: 'status', text: 'no other session in this directory' });
+            return;
+          }
+          const now = Date.now();
+          const entry = {
+            state: newQuestions([
+              {
+                id: 'session',
+                question: 'Resume which session of this directory?',
+                options: list.map(s => ({
+                  label: s.title.slice(0, 60),
+                  description: `${whenOf(s.createdAt, now)} · ${s.id}`,
+                })),
+              },
+            ]),
+            resolve: answer => {
+              const label = answer.answers[0]?.selected?.[0];
+              const chosen = list.find(s => s.title.slice(0, 60) === label);
+              if (chosen !== undefined && typeof switchSession === 'function') {
+                void Promise.resolve(switchSession(chosen.id)).catch(error =>
+                  pushItem({
+                    kind: 'status',
+                    text: `✗ could not resume: ${error instanceof Error ? error.message : String(error)}`,
+                  }),
+                );
+              }
+            },
+          };
+          setAsks(prev => [...prev, entry]);
+        });
         return;
       }
       if ((text === '/model' || text.startsWith('/model ')) && typeof listModels === 'function') {
