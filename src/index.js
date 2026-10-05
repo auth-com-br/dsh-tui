@@ -28,6 +28,9 @@ import { refRows } from './refs.js';
 import { agentRows } from './agents.js';
 import { keyRefFor } from './models.js';
 import { inventory } from './plugins.js';
+import { mediaTypeOf } from './attachments.js';
+import { readFile } from 'node:fs/promises';
+import { resolve as resolvePath, basename } from 'node:path';
 import { configuredServers, toolsByServer, mcpText } from './mcp.js';
 
 /** Stable Cordis plugin name (bundle row id: tui-runner). */
@@ -572,6 +575,37 @@ async function run(ctx, exit) {
             ctx.get('settings').mutate('llm-pi-ai', [{ op: 'unset', path: ['providers', route] }]),
         },
         listPlugins: () => inventory(ctx.get('loader')?.entries?.() ?? []),
+        // /image: the file read, its type checked, the model asked whether
+        // it takes images (as the web app's prompt does), and the image
+        // admitted to the attachment store, which normalizes and keeps it.
+        attachImage: async path => {
+          const attachments = ctx.get('attachments');
+          if (attachments === undefined) {
+            throw new Error('this profile keeps no attachments');
+          }
+          const full = resolvePath(cwd, path);
+          let data;
+          try {
+            data = new Uint8Array(await readFile(full));
+          } catch {
+            throw new Error(`cannot read ${full}`);
+          }
+          const mediaType = mediaTypeOf(data);
+          if (mediaType === undefined) {
+            throw new Error(`${basename(full)} is not a PNG, JPEG, WebP or GIF image`);
+          }
+          const now = current.selected?.current;
+          if (now !== undefined) {
+            const info = await ctx
+              .get('llm')
+              ?.resolveModelInfo?.(now.provider, now.model)
+              .catch(() => undefined);
+            if (info?.inputModalities !== undefined && !info.inputModalities.includes('image')) {
+              throw new Error(`${now.model} does not take images — /model to pick one that does`);
+            }
+          }
+          return attachments.saveImage({ data, mediaType, name: basename(full) });
+        },
         settingsService: ctx.get('settings') && {
           describe: () => ctx.get('settings').describe(),
           mutate: (ns, ops) =>

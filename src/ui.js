@@ -36,6 +36,7 @@ import { modelsFlow } from './models.js';
 import { settingsText, parseSettingsArgs } from './settingsview.js';
 import { pluginsText } from './plugins.js';
 import { THEMES } from './theme.js';
+import { pathArg, imageLabel, contentText } from './attachments.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg } from './utils.js';
 
@@ -112,6 +113,13 @@ const TUI_COMMANDS = [
     hint: '[auto|light|dark]',
   },
   {
+    name: 'image',
+    description: 'attach an image to the next message',
+    kind: 'command',
+    takesInput: true,
+    hint: '<path> | clear',
+  },
+  {
     name: 'models',
     description: 'model providers: API keys, add a server, its models',
     kind: 'command',
@@ -148,6 +156,7 @@ const HELP_TEXT = [
   "  /settings [ns.field value]  the plugins' settings; reset ns.field undoes",
   '  /plugins [filter]  what the harness loaded, failures first',
   '  /theme [auto|light|dark]  the backgrounds; kept for the next start',
+  '  /image <path>  attach an image to the next message (/image clear)',
   '  /trajectory [n]  the last n turns with steps, tools and timings',
   '  /rename <title>  rename this session',
   '  @path         refer to a file or folder; @ also lists other sessions',
@@ -836,7 +845,10 @@ export function App({
   themeBg: initialBg = '#000000',
   theme: initialTheme = 'auto',
   setTheme,
+  attachImage,
 }) {
+  // Images /image attached to the next message, admitted already.
+  const [pendingImages, setPendingImages] = useState([]);
   // The background the backgrounds are derived from; /theme changes it.
   const [themeBg, setThemeBg] = useState(initialBg);
   const [theme, setThemeName] = useState(initialTheme);
@@ -1177,9 +1189,9 @@ export function App({
             });
           }
           if (replaying.current && data.source?.kind === 'user') {
-            const text = (data.content ?? []).find(c => c.type === 'text')?.text;
-            if (typeof text === 'string' && text.trim() !== '') {
-              pushItem({ kind: 'user', text: shownMentions(text.trim()) });
+            const text = contentText(data.content ?? []);
+            if (text !== '') {
+              pushItem({ kind: 'user', text: shownMentions(text) });
             }
           }
           break;
@@ -1488,11 +1500,19 @@ export function App({
       setScrollLines(0);
       setBusy(true);
       lastUserText.current = value;
-      pushItem({ kind: 'user', text: shownMentions(value) });
+      const images = pendingImages.map(ref => ({ type: 'image', attachment: ref }));
+      setPendingImages([]);
+      pushItem({
+        kind: 'user',
+        text: shownMentions(contentText([{ type: 'text', text: value }, ...images])),
+      });
       try {
         // Fire-and-forget: session events drive the UI, not this promise.
         followup(
-          createUserMessage({ content: [{ type: 'text', text: value }], source: { kind: 'user' } }),
+          createUserMessage({
+            content: [{ type: 'text', text: value }, ...images],
+            source: { kind: 'user' },
+          }),
         );
       } catch (error) {
         setBusy(false);
@@ -1503,7 +1523,7 @@ export function App({
         });
       }
     },
-    [busy, followup, pushItem, showBusyHint],
+    [busy, followup, pushItem, showBusyHint, pendingImages],
   );
 
   const handleSubmit = useCallback(
@@ -1682,6 +1702,35 @@ export function App({
             error: true,
           });
         }
+        return;
+      }
+      // An image on the next message: admitted now, so a file that is not
+      // an image, or a model that takes none, is said before the message
+      // is written.
+      if (text === '/image' || text.startsWith('/image ')) {
+        setInput('');
+        const arg = text.slice('/image'.length).trim();
+        if (arg === 'clear') {
+          setPendingImages([]);
+          pushItem({ kind: 'status', text: 'attachments cleared' });
+          return;
+        }
+        if (arg === '' || typeof attachImage !== 'function') {
+          pushItem({
+            kind: 'status',
+            text: 'usage: /image <path> — PNG, JPEG, WebP or GIF; /image clear drops them',
+          });
+          return;
+        }
+        void attachImage(pathArg(arg)).then(
+          ref => setPendingImages(prev => [...prev, ref]),
+          error =>
+            pushItem({
+              kind: 'status',
+              text: `✗ ${error instanceof Error ? error.message : String(error)}`,
+              error: true,
+            }),
+        );
         return;
       }
       if (text === '/models') {
@@ -1896,6 +1945,7 @@ export function App({
       listPlugins,
       theme,
       setTheme,
+      attachImage,
       reminders,
       listCommands,
       listModels,
@@ -1914,7 +1964,17 @@ export function App({
       : asks.length > 0
         ? questionLines(asks[0].state, width).length - 1
         : menuShown.length;
-  const standingShown = standingLines(standing, width);
+  const standingShown = [
+    ...standingLines(standing, width),
+    ...(pendingImages.length > 0
+      ? [
+          {
+            text: `${pendingImages.map(imageLabel).join('  ')}  · on the next message (/image clear)`,
+            style: 'goal',
+          },
+        ]
+      : []),
+  ];
 
   // ── Viewport: keep the transcript tail visible (bottom-anchored), with
   // line-based scrolling on top (scrollLines = lines offset from the bottom).

@@ -95,8 +95,10 @@ Each phase is usable on its own. Order is by what blocks real work first.
 
 ## Phase 5 — polish
 
-- [ ] **Attachments** (`attachment`): images by path, shown with the
-      terminal's graphics where it has them.
+- [x] **Attachments** (`attachment`): `/image <path>` attaches PNG, JPEG,
+      WebP or GIF to the next message, admitted to the harness's store;
+      refused for a model that takes no images. Drawing the image with the
+      terminal's graphics is still to do; it shows as `📎 name W×H`.
 - [ ] **Message feedback** (`message-feedback`).
 - [ ] **Cordis panel** (`cordis`).
 
