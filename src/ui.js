@@ -33,6 +33,7 @@ import { foldWorkflow, workflowText } from './workflow.js';
 import { trajectoryText } from './trajectory.js';
 import { foldSchedule, scheduleText, reminderPrompt } from './schedule.js';
 import { modelsFlow } from './models.js';
+import { settingsText, parseSettingsArgs } from './settingsview.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg } from './utils.js';
 
@@ -88,6 +89,13 @@ const TUI_COMMANDS = [
   { name: 'jobs', description: "this session's background jobs", kind: 'command' },
   { name: 'schedule', description: "this session's reminders", kind: 'command' },
   {
+    name: 'settings',
+    description: "the plugins' settings: list, set or reset a field",
+    kind: 'command',
+    takesInput: true,
+    hint: '[ns.field value | reset ns.field]',
+  },
+  {
     name: 'models',
     description: 'model providers: API keys, add a server, its models',
     kind: 'command',
@@ -121,6 +129,7 @@ const HELP_TEXT = [
   "  /jobs         this session's background jobs",
   "  /schedule     this session's reminders (overlays/schedule.yml)",
   '  /models       model providers: API keys, add a server (local or remote)',
+  "  /settings [ns.field value]  the plugins' settings; reset ns.field undoes",
   '  /trajectory [n]  the last n turns with steps, tools and timings',
   '  /rename <title>  rename this session',
   '  @path         refer to a file or folder; @ also lists other sessions',
@@ -796,6 +805,7 @@ export function App({
   onJobsChanged,
   sessionEvents,
   modelsService,
+  settingsService,
   viewer,
   onBack,
   replayNote = 'resumed',
@@ -1575,6 +1585,46 @@ export function App({
       }
       // The model providers and their keys: a few questions in the
       // composer's place (src/models.js).
+      // The plugins' configuration (src/settingsview.js): listed, and a
+      // field set or put back, validated by the harness.
+      if (text === '/settings' || text.startsWith('/settings ')) {
+        setInput('');
+        if (settingsService === undefined) {
+          pushItem({ kind: 'status', text: 'no settings here' });
+          return;
+        }
+        const described = settingsService.describe();
+        const edit = parseSettingsArgs(
+          text.slice('/settings'.length),
+          described.map(d => d.ns),
+        );
+        if ('error' in edit) {
+          pushItem({ kind: 'status', text: `✗ ${edit.error}`, error: true });
+          return;
+        }
+        if (edit.op === 'show') {
+          pushItem({ kind: 'status', text: settingsText(described) });
+          return;
+        }
+        const key = `${edit.ns}.${edit.path.join('.')}`;
+        void settingsService.mutate(edit.ns, [edit]).then(
+          () =>
+            pushItem({
+              kind: 'status',
+              text:
+                edit.op === 'set'
+                  ? `${key} = ${JSON.stringify(edit.value)}`
+                  : `${key} is back to the profile's`,
+            }),
+          error =>
+            pushItem({
+              kind: 'status',
+              text: `✗ ${key}: ${error instanceof Error ? error.message : String(error)}`,
+              error: true,
+            }),
+        );
+        return;
+      }
       if (text === '/models') {
         setInput('');
         if (modelsService === undefined) {
@@ -1783,6 +1833,7 @@ export function App({
       listJobs,
       sessionEvents,
       modelsService,
+      settingsService,
       reminders,
       listCommands,
       listModels,

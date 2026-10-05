@@ -566,6 +566,18 @@ async function run(ctx, exit) {
           removeRoute: route =>
             ctx.get('settings').mutate('llm-pi-ai', [{ op: 'unset', path: ['providers', route] }]),
         },
+        settingsService: ctx.get('settings') && {
+          describe: () => ctx.get('settings').describe(),
+          mutate: (ns, ops) =>
+            ctx.get('settings').mutate(
+              ns,
+              ops.map(o =>
+                o.op === 'set'
+                  ? { op: 'set', path: o.path, value: o.value }
+                  : { op: 'unset', path: o.path },
+              ),
+            ),
+        },
         listModels: async () => {
           const llm = ctx.get('llm');
           if (llm === undefined) {
