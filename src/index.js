@@ -575,6 +575,37 @@ async function run(ctx, exit) {
             ctx.get('settings').mutate('llm-pi-ai', [{ op: 'unset', path: ['providers', route] }]),
         },
         listPlugins: () => inventory(ctx.get('loader')?.entries?.() ?? []),
+        // /rate (dsh-message-feedback): a result is { ok, value | error }.
+        feedback: ctx.get('messageFeedback') && {
+          get: async messageId => {
+            const r = await ctx.get('messageFeedback').list({ sessionId: agent.session.id });
+            if (!r.ok) {
+              throw new Error(r.error.code);
+            }
+            return r.value.items.find(i => i.messageId === messageId);
+          },
+          put: async (messageId, rating, note, ifVersion) => {
+            const r = await ctx.get('messageFeedback').put({
+              sessionId: agent.session.id,
+              messageId,
+              rating,
+              ...(note ? { note } : {}),
+              ifVersion,
+            });
+            if (!r.ok) {
+              throw new Error(r.error.code);
+            }
+            return r.value;
+          },
+          remove: async (messageId, ifVersion) => {
+            const r = await ctx
+              .get('messageFeedback')
+              .delete({ sessionId: agent.session.id, messageId, ifVersion });
+            if (!r.ok) {
+              throw new Error(r.error.code);
+            }
+          },
+        },
         // /image: the file read, its type checked, the model asked whether
         // it takes images (as the web app's prompt does), and the image
         // admitted to the attachment store, which normalizes and keeps it.

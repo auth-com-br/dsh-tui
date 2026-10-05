@@ -37,6 +37,7 @@ import { settingsText, parseSettingsArgs } from './settingsview.js';
 import { pluginsText } from './plugins.js';
 import { THEMES } from './theme.js';
 import { pathArg, imageLabel, contentText } from './attachments.js';
+import { parseRate, ratingText } from './feedback.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg } from './utils.js';
 
@@ -120,6 +121,13 @@ const TUI_COMMANDS = [
     hint: '<path> | clear',
   },
   {
+    name: 'rate',
+    description: 'rate the last answer, with a note',
+    kind: 'command',
+    takesInput: true,
+    hint: 'good|bad [note] | clear',
+  },
+  {
     name: 'models',
     description: 'model providers: API keys, add a server, its models',
     kind: 'command',
@@ -157,6 +165,7 @@ const HELP_TEXT = [
   '  /plugins [filter]  what the harness loaded, failures first',
   '  /theme [auto|light|dark]  the backgrounds; kept for the next start',
   '  /image <path>  attach an image to the next message (/image clear)',
+  '  /rate good|bad [note]  rate the last answer; the model never sees it',
   '  /trajectory [n]  the last n turns with steps, tools and timings',
   '  /rename <title>  rename this session',
   '  @path         refer to a file or folder; @ also lists other sessions',
@@ -846,7 +855,10 @@ export function App({
   theme: initialTheme = 'auto',
   setTheme,
   attachImage,
+  feedback,
 }) {
+  // The message that closed the last turn: what /rate rates.
+  const lastAnswerId = useRef(undefined);
   // Images /image attached to the next message, admitted already.
   const [pendingImages, setPendingImages] = useState([]);
   // The background the backgrounds are derived from; /theme changes it.
@@ -1283,6 +1295,9 @@ export function App({
         }
         case 'assistant/message': {
           const message = data.message && typeof data.message === 'object' ? data.message : {};
+          if (typeof message.id === 'string') {
+            lastAnswerId.current = message.id;
+          }
           const content = Array.isArray(message.content) ? message.content : [];
           const itemUsage = data.usage && typeof data.usage === 'object' ? data.usage : undefined;
           if (itemUsage) {
@@ -1733,6 +1748,42 @@ export function App({
         );
         return;
       }
+      if (text === '/rate' || text.startsWith('/rate ')) {
+        setInput('');
+        const edit = parseRate(text.slice('/rate'.length));
+        const say = (line, error = false) => pushItem({ kind: 'status', text: line, error });
+        if ('error' in edit) {
+          say(`✗ ${edit.error}`, true);
+          return;
+        }
+        if (feedback === undefined || lastAnswerId.current === undefined) {
+          say(feedback === undefined ? 'no feedback store here' : 'no answer to rate yet');
+          return;
+        }
+        const messageId = lastAnswerId.current;
+        void (async () => {
+          const current = await feedback.get(messageId);
+          if (edit.op === 'show') {
+            say(ratingText(current));
+          } else if (edit.op === 'clear') {
+            if (current !== undefined) {
+              await feedback.remove(messageId, current.version);
+            }
+            say('the last answer is not rated now');
+          } else {
+            const item = await feedback.put(
+              messageId,
+              edit.rating,
+              edit.note,
+              current?.version ?? null,
+            );
+            say(`${ratingText(item)} — kept with the session; the model does not see it`);
+          }
+        })().catch(error =>
+          say(`✗ ${error instanceof Error ? error.message : String(error)}`, true),
+        );
+        return;
+      }
       if (text === '/models') {
         setInput('');
         if (modelsService === undefined) {
@@ -1946,6 +1997,7 @@ export function App({
       theme,
       setTheme,
       attachImage,
+      feedback,
       reminders,
       listCommands,
       listModels,

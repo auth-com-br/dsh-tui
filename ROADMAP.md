@@ -99,7 +99,8 @@ Each phase is usable on its own. Order is by what blocks real work first.
       WebP or GIF to the next message, admitted to the harness's store;
       refused for a model that takes no images. Drawing the image with the
       terminal's graphics is still to do; it shows as `📎 name W×H`.
-- [ ] **Message feedback** (`message-feedback`).
+- [x] **Message feedback** (`message-feedback`): `/rate good|bad [note]`
+      on the last answer, kept with the session, never seen by the model.
 - [ ] **Cordis panel** (`cordis`).
 
 ## Inside tend

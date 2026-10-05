@@ -18,5 +18,11 @@
         # Every session, not the default 50 in an order of the store's: the
         # menu matches titles itself, newest first (src/index.js).
         candidateLimit: 200
+    # /rate: a rating and a note on an answer, kept with the session and
+    # never seen by the model; the limit is the web app's.
+    - id: message-feedback
+      name: '@deepseek-ai/dsh-message-feedback'
+      config:
+        maxNoteBytes: 8192
     - id: tui-runner
       name: 'deepseek-harness-tui'
