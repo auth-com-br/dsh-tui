@@ -101,7 +101,12 @@ Each phase is usable on its own. Order is by what blocks real work first.
       terminal's graphics is still to do; it shows as `📎 name W×H`.
 - [x] **Message feedback** (`message-feedback`): `/rate good|bad [note]`
       on the last answer, kept with the session, never seen by the model.
-- [ ] **Cordis panel** (`cordis`).
+- [ ] **Cordis panel** (`cordis`): left for a decision. It operates
+      packages the model writes and runs inside the dsh process
+      (dsh-tool-cordis, dsh-cordis-host-runner: host code in a node:vm
+      sandbox, browser halves approved on a web page the terminal does not
+      have). The web app composes it only in its own bundle; the TUI would
+      need an opt-in overlay and a panel to list, stop and remove them.
 
 ## Inside tend
 
