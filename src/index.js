@@ -702,7 +702,10 @@ async function run(ctx, exit) {
           return themeBackground(next, detectedBg);
         },
       }),
-      { exitOnCtrlC: false },
+      // incrementalRendering: only the lines that changed are written. A
+      // blink of the composer's cursor, or a key typed, rewrote the whole
+      // screen — some 5 KB a frame, felt over SSH.
+      { exitOnCtrlC: false, incrementalRendering: true },
     );
   };
   // A stdio MCP server's stderr is the harness's — the MCP SDK spawns it

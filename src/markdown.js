@@ -266,6 +266,27 @@ function listTable(cells, width) {
  * @returns {Seg[][]}
  */
 export function layoutMarkdown(text, width) {
+  // Every render lays out and measures every message on screen; a message
+  // does not change once written, so its layout is kept by text and width.
+  const key = `${width}\u0000${text}`;
+  const hit = laidOut.get(key);
+  if (hit !== undefined) {
+    laidOut.delete(key);
+    laidOut.set(key, hit);
+    return hit;
+  }
+  const lines = layout(String(text), width);
+  laidOut.set(key, lines);
+  if (laidOut.size > 400) {
+    laidOut.delete(laidOut.keys().next().value);
+  }
+  return lines;
+}
+
+/** Layouts already made, least recently used first. */
+const laidOut = new Map();
+
+function layout(text, width) {
   const w = Math.max(4, width);
   const lines = String(text).split('\n');
   const out = [];

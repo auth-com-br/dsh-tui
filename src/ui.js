@@ -21,7 +21,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
-import TextInput from 'ink-text-input';
+import { Composer } from './composer.js';
 import { newQuestions, questionKey, questionLines, answersOf } from './questions.js';
 import { whenOf } from './sessions.js';
 import { menuQuery, menuRows, menuLines, pickRow, leadingName } from './slashmenu.js';
@@ -792,7 +792,25 @@ export function App({
   const [theme, setThemeName] = useState(initialTheme);
   const [items, setItems] = useState([]);
   const [todos, setTodos] = useState([]);
-  const [input, setInput] = useState('');
+  // The composer's text is the composer's (composer.js), so typing does not
+  // re-render the App; it is mirrored here only while it is a `/` line or
+  // ends in an `@` token, which is when the menus need it. composerText is
+  // always the whole of it.
+  const [input, setMirror] = useState('');
+  const composerText = useRef('');
+  const composerApi = useRef(null);
+  const onComposerChange = useCallback(text => {
+    composerText.current = text;
+    setMirror(text.startsWith('/') || activeAtToken(text) !== undefined ? text : '');
+  }, []);
+  const setInput = useCallback(
+    text => {
+      composerText.current = text;
+      composerApi.current?.set(text);
+      onComposerChange(text);
+    },
+    [onComposerChange],
+  );
   const [busy, setBusy] = useState(false);
   const [stream, setStream] = useState({ reasoning: '', text: '', tool: null });
   const [hint, setHint] = useState(null);
@@ -810,13 +828,10 @@ export function App({
   const [asks, setAsks] = useState([]);
   // The `/` menu: its cursor, the line it was closed on with esc (it stays
   // closed until the line changes), and the skills it offers, read once on
-  // the first `/`. inputKey remounts the composer when the menu completes
-  // the line, so its cursor lands at the end — ink-text-input keeps its own
-  // cursor and leaves it where it was on a value changed from outside.
+  // the first `/`.
   const [menuCursor, setMenuCursor] = useState(0);
   const [menuClosedFor, setMenuClosedFor] = useState(null);
   const [skills, setSkills] = useState(undefined);
-  const [inputKey, setInputKey] = useState(0);
   // The `@` menu's rows and the token they were asked for.
   const [refs, setRefs] = useState({ key: undefined, rows: [] });
   // Plan mode and the goal, folded from the session's events (status.js).
@@ -917,8 +932,6 @@ export function App({
 
   // The `/` menu, open while the composer holds a single `/word` and the
   // composer is shown. The skills are asked for once, on the first `/`.
-  const composerText = useRef('');
-  composerText.current = input;
   const handleSubmitRef = useRef(undefined);
   const query = approvals.length === 0 && asks.length === 0 ? menuQuery(input) : undefined;
   useEffect(() => {
@@ -997,7 +1010,6 @@ export function App({
       return;
     }
     setInput(replaceToken(line, token, drill && row.drill ? row.drill : row.settle));
-    setInputKey(k => k + 1);
   };
   const pickFromMenu = row => {
     if (row.settle !== undefined) {
@@ -1007,7 +1019,6 @@ export function App({
     const pick = pickRow(row, query);
     if ('insert' in pick) {
       setInput(pick.insert);
-      setInputKey(k => k + 1);
     } else {
       handleSubmitRef.current(pick.run);
     }
@@ -1059,7 +1070,6 @@ export function App({
           pickRef(menu[cursor], true);
         } else {
           setInput(`/${menu[cursor].name} `);
-          setInputKey(k => k + 1);
         }
         return;
       }
@@ -2155,10 +2165,10 @@ export function App({
                 Box,
                 { key: 'composer', paddingLeft: 1, paddingRight: 1, flexDirection: 'row' },
                 el(Text, { bold: true, color: ACCENT }, '❯ '),
-                el(TextInput, {
-                  key: inputKey,
-                  value: input,
-                  onChange: setInput,
+                el(Composer, {
+                  ref: composerApi,
+                  initial: composerText.current,
+                  onChange: onComposerChange,
                   // enter on an open menu picks its row: a bare command runs,
                   // one taking an argument or a skill is completed to be
                   // finished.
