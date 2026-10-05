@@ -72,3 +72,62 @@ export function probeTerminalBg(timeoutMs = 300) {
     }
   });
 }
+
+/**
+ * The theme the person chose: light, dark, or auto — the background the
+ * terminal reported at start. The web app's light/dark/system
+ * (dsh-client-ui-theme); here it decides the backgrounds drawn behind the
+ * user's messages and code, which are derived from the terminal's own.
+ * Kept in $DSH_HOME/tui.json, the TUI's own file: a dsh settings namespace
+ * needs the harness's schema library, which a plugin cannot share.
+ */
+export const THEMES = ['auto', 'light', 'dark'];
+
+/**
+ * The background to draw for a theme.
+ * @param {string} theme
+ * @param {string | null} detected the terminal's, when it said
+ */
+export function themeBackground(theme, detected) {
+  if (theme === 'light') {
+    return '#ffffff';
+  }
+  if (theme === 'dark') {
+    return '#000000';
+  }
+  return detected ?? '#000000';
+}
+
+/** $DSH_HOME/tui.json, where the TUI keeps its own preferences. */
+export function prefsPath(env = process.env) {
+  const home = env.DSH_HOME?.trim() || `${env.HOME ?? ''}/.dsh`;
+  return `${home}/tui.json`;
+}
+
+/**
+ * The saved theme, 'auto' when none is or the file cannot be read.
+ * @param {(path: string) => string} read
+ */
+export function loadTheme(read, path = prefsPath()) {
+  try {
+    const theme = JSON.parse(read(path)).theme;
+    return THEMES.includes(theme) ? theme : 'auto';
+  } catch {
+    return 'auto';
+  }
+}
+
+/**
+ * Save the theme, keeping whatever else the file holds.
+ * @param {string} theme
+ * @param {{read: (path: string) => string, write: (path: string, text: string) => void}} fs
+ */
+export function saveTheme(theme, fs, path = prefsPath()) {
+  let prefs = {};
+  try {
+    prefs = JSON.parse(fs.read(path));
+  } catch {
+    // No file yet, or not JSON: written anew.
+  }
+  fs.write(path, `${JSON.stringify({ ...prefs, theme }, null, 2)}\n`);
+}

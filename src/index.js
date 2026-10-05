@@ -8,7 +8,9 @@
 
 import { randomUUID } from 'node:crypto';
 import React from 'react';
-import { probeTerminalBg } from './theme.js';
+import { probeTerminalBg, themeBackground, loadTheme, saveTheme } from './theme.js';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { render } from 'ink';
 import { installModelSelection } from '@deepseek-ai/dsh-agent';
 import { SessionId } from '@deepseek-ai/dsh-session';
@@ -100,7 +102,9 @@ async function run(ctx, exit) {
 
   // Probe the terminal background BEFORE Ink mounts: Ink's key parser would
   // otherwise read the OSC 11 response as keystrokes and type garbage.
-  const themeBg = await probeTerminalBg();
+  const detectedBg = await probeTerminalBg();
+  const readText = path => readFileSync(path, 'utf8');
+  let theme = loadTheme(readText);
 
   // Loader siblings mount concurrently; await the complete composition before
   // creating an Agent so its scoped tools are not half-composed.
@@ -618,7 +622,20 @@ async function run(ctx, exit) {
         history: view?.history ?? (resumed ? agent.session.snapshotEvents(0, firstSeq) : []),
         firstSeq: view?.firstSeq ?? firstSeq,
         model: selected.current?.model ?? '?',
-        themeBg,
+        themeBg: themeBackground(theme, detectedBg),
+        // /theme: applied at once, and kept for the next start.
+        theme,
+        setTheme: next => {
+          theme = next;
+          saveTheme(next, {
+            read: readText,
+            write: (path, text) => {
+              mkdirSync(dirname(path), { recursive: true });
+              writeFileSync(path, text);
+            },
+          });
+          return themeBackground(next, detectedBg);
+        },
       }),
       { exitOnCtrlC: false },
     );

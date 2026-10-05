@@ -81,13 +81,17 @@ Each phase is usable on its own. Order is by what blocks real work first.
 
 ## Phase 4 — settings in the terminal
 
-- [ ] **Models and keys** (`settings-models`): providers, keys (write-only),
-      model lists, custom OpenAI-compatible routes — what
-      `~/.dsh/settings.yaml` is edited by hand for today.
-- [ ] **Plugins** (`settings-plugins`, `settings-plugin-inventory`).
-- [ ] **Agent presets** (`agent-preset`).
-- [ ] **Theme** (`theme`): light/dark/system, beside the OSC 11 detection
-      already there.
+- [x] **Models and keys** (`settings-models`): `/models` — keys set
+      masked and never read back, servers of one's own added with their
+      models asked of the server, refreshed, removed.
+- [x] **Plugins** (`settings-plugins`, `settings-plugin-inventory`):
+      `/settings` lists and edits the plugins' settings, validated by the
+      harness; `/plugins` lists what is loaded, failures first.
+- [ ] **Agent presets** (`agent-preset`): the tui profile composes no
+      preset roster, and the web app shows nothing then either; to do if
+      a profile with presets is wanted.
+- [x] **Theme** (`theme`): `/theme auto|light|dark`, kept in
+      `~/.dsh/tui.json`; auto is the terminal's own background (OSC 11).
 
 ## Phase 5 — polish
 

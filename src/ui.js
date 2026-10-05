@@ -35,6 +35,7 @@ import { foldSchedule, scheduleText, reminderPrompt } from './schedule.js';
 import { modelsFlow } from './models.js';
 import { settingsText, parseSettingsArgs } from './settingsview.js';
 import { pluginsText } from './plugins.js';
+import { THEMES } from './theme.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg } from './utils.js';
 
@@ -104,6 +105,13 @@ const TUI_COMMANDS = [
     hint: '[filter]',
   },
   {
+    name: 'theme',
+    description: 'light, dark, or auto (what the terminal says)',
+    kind: 'command',
+    takesInput: true,
+    hint: '[auto|light|dark]',
+  },
+  {
     name: 'models',
     description: 'model providers: API keys, add a server, its models',
     kind: 'command',
@@ -139,6 +147,7 @@ const HELP_TEXT = [
   '  /models       model providers: API keys, add a server (local or remote)',
   "  /settings [ns.field value]  the plugins' settings; reset ns.field undoes",
   '  /plugins [filter]  what the harness loaded, failures first',
+  '  /theme [auto|light|dark]  the backgrounds; kept for the next start',
   '  /trajectory [n]  the last n turns with steps, tools and timings',
   '  /rename <title>  rename this session',
   '  @path         refer to a file or folder; @ also lists other sessions',
@@ -824,8 +833,13 @@ export function App({
   onInterrupt,
   firstSeq = 0,
   model = '?',
-  themeBg = '#000000',
+  themeBg: initialBg = '#000000',
+  theme: initialTheme = 'auto',
+  setTheme,
 }) {
+  // The background the backgrounds are derived from; /theme changes it.
+  const [themeBg, setThemeBg] = useState(initialBg);
+  const [theme, setThemeName] = useState(initialTheme);
   const [items, setItems] = useState([]);
   const [todos, setTodos] = useState([]);
   const [input, setInput] = useState('');
@@ -1646,6 +1660,30 @@ export function App({
         });
         return;
       }
+      if (text === '/theme' || text.startsWith('/theme ')) {
+        setInput('');
+        const wanted = text.slice('/theme'.length).trim();
+        if (wanted === '') {
+          pushItem({ kind: 'status', text: `theme: ${theme} — /theme ${THEMES.join('|')}` });
+          return;
+        }
+        if (!THEMES.includes(wanted) || typeof setTheme !== 'function') {
+          pushItem({ kind: 'status', text: `✗ /theme ${THEMES.join('|')}`, error: true });
+          return;
+        }
+        try {
+          setThemeBg(setTheme(wanted));
+          setThemeName(wanted);
+          pushItem({ kind: 'status', text: `theme: ${wanted}, kept for the next start` });
+        } catch (error) {
+          pushItem({
+            kind: 'status',
+            text: `✗ ${error instanceof Error ? error.message : String(error)}`,
+            error: true,
+          });
+        }
+        return;
+      }
       if (text === '/models') {
         setInput('');
         if (modelsService === undefined) {
@@ -1856,6 +1894,8 @@ export function App({
       modelsService,
       settingsService,
       listPlugins,
+      theme,
+      setTheme,
       reminders,
       listCommands,
       listModels,
