@@ -13,7 +13,7 @@ const MAX_DETAIL_LINES = 12;
 
 /**
  * The state for a batch of questions.
- * @param {Array<{id: string, question: string, header?: string, detail?: string, options?: Array<{label: string, description?: string}>, multiSelect?: boolean}>} questions
+ * @param {Array<{id: string, question: string, header?: string, detail?: string, options?: Array<{label: string, description?: string}>, multiSelect?: boolean, secret?: boolean, custom?: boolean}>} questions
  */
 export function newQuestions(questions) {
   return {
@@ -27,9 +27,14 @@ export function newQuestions(questions) {
   };
 }
 
-/** The current question's rows: its options, then "write my own answer". */
+/**
+ * The current question's rows: its options, then "write my own answer" —
+ * unless the question is a menu (custom: false), where only an option is
+ * an answer.
+ */
 function rowsOf(q) {
-  return [...(q.options ?? []).map(o => o.label), null];
+  const options = (q.options ?? []).map(o => o.label);
+  return q.custom === false && options.length > 0 ? options : [...options, null];
 }
 
 /**
@@ -180,7 +185,10 @@ export function questionLines(s, width) {
     });
   }
   if (s.typing) {
-    out.push({ text: cut(`  ✎ ${s.text}█`), style: 'input' });
+    // A secret (an API key) is typed unseen: the screen is the one place
+    // it would otherwise be left, in the scrollback too.
+    const shown = q.secret ? '•'.repeat(s.text.length) : s.text;
+    out.push({ text: cut(`  ✎ ${shown}█`), style: 'input' });
     out.push({ text: '  enter send · esc back', style: 'keys' });
   } else {
     const multi = q.multiSelect ? ' · space mark' : '';

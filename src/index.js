@@ -24,6 +24,7 @@ import {
 } from './sessions.js';
 import { refRows } from './refs.js';
 import { agentRows } from './agents.js';
+import { keyRefFor } from './models.js';
 import { configuredServers, toolsByServer, mcpText } from './mcp.js';
 
 /** Stable Cordis plugin name (bundle row id: tui-runner). */
@@ -496,6 +497,75 @@ async function run(ctx, exit) {
         // /model: the models of every configured route, the current one, and
         // a switch that also becomes the default for later sessions, as the
         // web app's model selection saves it.
+        // /models: the providers and their keys (src/models.js). Keys go to
+        // the credential store and are never read back; a server's route
+        // is written into llm-pi-ai path by path (settings.mutate), as the
+        // web app writes it, so nothing it did not touch is rewritten.
+        modelsService: {
+          providers: async () => {
+            const llm = ctx.get('llm');
+            const settings = ctx.get('settings');
+            const credentials = ctx.get('credentials');
+            if (llm === undefined || settings === undefined || credentials === undefined) {
+              throw new Error('this profile has no settings or credential store');
+            }
+            const names = new Map(llm.listProviders().map(p => [p.id, p.name]));
+            const modelsOf = async id => {
+              try {
+                return (await llm.listModels(id)).map(m => m.id);
+              } catch {
+                return [];
+              }
+            };
+            const keyOf = async ref => {
+              const info = await credentials.describe(ref);
+              return { keySet: info.configured === true, keyWritable: info.writable !== false };
+            };
+            const described = settings.describe();
+            const out = [];
+            const official = described.find(d => d.ns === 'llm-deepseek');
+            if (official !== undefined) {
+              const keyRef = official.value?.apiKeyEnv ?? 'DEEPSEEK_API_KEY';
+              out.push({
+                id: 'deepseek-official',
+                name: names.get('deepseek-official') ?? 'DeepSeek',
+                keyRef,
+                ...(await keyOf(keyRef)),
+                models: await modelsOf('deepseek-official'),
+              });
+            }
+            const routes = described.find(d => d.ns === 'llm-pi-ai')?.user?.providers ?? {};
+            for (const [route, profile] of Object.entries(routes)) {
+              const keyRef = profile?.apiKeyEnv ?? keyRefFor(route);
+              out.push({
+                id: route,
+                name: profile?.displayName ?? names.get(route) ?? route,
+                keyRef,
+                ...(await keyOf(keyRef)),
+                models: (profile?.models ?? []).map(m => m.id),
+                route,
+                baseURL: profile?.baseURL,
+                api: profile?.api,
+              });
+            }
+            return out;
+          },
+          setKey: (ref, value) => ctx.get('credentials').set(ref, value),
+          unsetKey: ref => ctx.get('credentials').unset(ref),
+          discover: request => ctx.get('llm').discoverModels('llm-pi-ai', request),
+          setRoute: (route, profile) =>
+            ctx
+              .get('settings')
+              .mutate('llm-pi-ai', [{ op: 'set', path: ['providers', route], value: profile }]),
+          setModels: (route, models) =>
+            ctx
+              .get('settings')
+              .mutate('llm-pi-ai', [
+                { op: 'set', path: ['providers', route, 'models'], value: models },
+              ]),
+          removeRoute: route =>
+            ctx.get('settings').mutate('llm-pi-ai', [{ op: 'unset', path: ['providers', route] }]),
+        },
         listModels: async () => {
           const llm = ctx.get('llm');
           if (llm === undefined) {

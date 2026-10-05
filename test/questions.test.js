@@ -75,3 +75,29 @@ describe('questions', () => {
     assert.match(lines.at(-1), /enter confirm/);
   });
 });
+
+describe('secret and menu questions', () => {
+  test('a secret answer is typed unseen and answered as typed', () => {
+    let s = newQuestions([{ id: 'key', question: 'API key', secret: true }]);
+    for (const ch of 'sk-123') {
+      s = questionKey(s, ch, {});
+    }
+    const input = questionLines(s, 80).find(l => l.style === 'input');
+    assert.equal(input.text, '  ✎ ••••••█');
+    s = questionKey(s, '', { return: true });
+    assert.deepEqual(answersOf(s), { answers: [{ id: 'key', selected: [], custom: 'sk-123' }] });
+  });
+
+  test('a menu offers only its options', () => {
+    const s = newQuestions([
+      { id: 'm', question: 'Pick', custom: false, options: [{ label: 'a' }, { label: 'b' }] },
+    ]);
+    const rows = questionLines(s, 80).filter(l => l.style === 'row' || l.style === 'selected');
+    assert.deepEqual(rows.map(r => r.text.trim()).slice(1), ['› 1. a', '2. b']);
+    assert.equal(
+      questionKey(questionKey(s, '', { upArrow: true }), '', { return: true }).answers[0]
+        .selected[0],
+      'b',
+    );
+  });
+});

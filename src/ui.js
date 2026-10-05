@@ -32,6 +32,7 @@ import { jobsBadge, jobsText } from './jobs.js';
 import { foldWorkflow, workflowText } from './workflow.js';
 import { trajectoryText } from './trajectory.js';
 import { foldSchedule, scheduleText, reminderPrompt } from './schedule.js';
+import { modelsFlow } from './models.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg } from './utils.js';
 
@@ -87,6 +88,11 @@ const TUI_COMMANDS = [
   { name: 'jobs', description: "this session's background jobs", kind: 'command' },
   { name: 'schedule', description: "this session's reminders", kind: 'command' },
   {
+    name: 'models',
+    description: 'model providers: API keys, add a server, its models',
+    kind: 'command',
+  },
+  {
     name: 'trajectory',
     description: 'the last turns with their steps, tools and timings',
     kind: 'command',
@@ -114,6 +120,7 @@ const HELP_TEXT = [
   "  /agents       watch this session's subagents (read-only)",
   "  /jobs         this session's background jobs",
   "  /schedule     this session's reminders (overlays/schedule.yml)",
+  '  /models       model providers: API keys, add a server (local or remote)',
   '  /trajectory [n]  the last n turns with steps, tools and timings',
   '  /rename <title>  rename this session',
   '  @path         refer to a file or folder; @ also lists other sessions',
@@ -788,6 +795,7 @@ export function App({
   listJobs,
   onJobsChanged,
   sessionEvents,
+  modelsService,
   viewer,
   onBack,
   replayNote = 'resumed',
@@ -1522,6 +1530,7 @@ export function App({
                 {
                   id: 'agent',
                   question: 'Subagent to watch (read-only; esc there comes back)',
+                  custom: false,
                   options: rows.map(r => ({ label: r.label, description: r.description })),
                 },
               ]),
@@ -1562,6 +1571,27 @@ export function App({
               ? trajectoryText(sessionEvents(), Number.isFinite(n) && n > 0 ? n : 1, Date.now())
               : 'no session log here',
         });
+        return;
+      }
+      // The model providers and their keys: a few questions in the
+      // composer's place (src/models.js).
+      if (text === '/models') {
+        setInput('');
+        if (modelsService === undefined) {
+          pushItem({ kind: 'status', text: 'no settings here' });
+          return;
+        }
+        const ask = questions =>
+          new Promise(resolve =>
+            setAsks(prev => [
+              ...prev,
+              { state: newQuestions(questions), resolve: answer => resolve(answer?.answers) },
+            ]),
+          );
+        const say = (line, error = false) => pushItem({ kind: 'status', text: line, error });
+        void modelsFlow({ ask, say }, modelsService).catch(error =>
+          say(`✗ ${error instanceof Error ? error.message : String(error)}`, true),
+        );
         return;
       }
       if (text === '/schedule') {
@@ -1627,6 +1657,7 @@ export function App({
             state: newQuestions([
               {
                 id: 'session',
+                custom: false,
                 question: 'Resume which session of this directory?',
                 options: list.map(s => ({
                   label: s.title.slice(0, 60),
@@ -1751,6 +1782,7 @@ export function App({
       openAgent,
       listJobs,
       sessionEvents,
+      modelsService,
       reminders,
       listCommands,
       listModels,
