@@ -34,6 +34,7 @@ import { trajectoryText } from './trajectory.js';
 import { foldSchedule, scheduleText, reminderPrompt } from './schedule.js';
 import { modelsFlow } from './models.js';
 import { settingsText, parseSettingsArgs } from './settingsview.js';
+import { pluginsText } from './plugins.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg } from './utils.js';
 
@@ -96,6 +97,13 @@ const TUI_COMMANDS = [
     hint: '[ns.field value | reset ns.field]',
   },
   {
+    name: 'plugins',
+    description: 'what the harness loaded, failures first',
+    kind: 'command',
+    takesInput: true,
+    hint: '[filter]',
+  },
+  {
     name: 'models',
     description: 'model providers: API keys, add a server, its models',
     kind: 'command',
@@ -130,6 +138,7 @@ const HELP_TEXT = [
   "  /schedule     this session's reminders (overlays/schedule.yml)",
   '  /models       model providers: API keys, add a server (local or remote)',
   "  /settings [ns.field value]  the plugins' settings; reset ns.field undoes",
+  '  /plugins [filter]  what the harness loaded, failures first',
   '  /trajectory [n]  the last n turns with steps, tools and timings',
   '  /rename <title>  rename this session',
   '  @path         refer to a file or folder; @ also lists other sessions',
@@ -806,6 +815,7 @@ export function App({
   sessionEvents,
   modelsService,
   settingsService,
+  listPlugins,
   viewer,
   onBack,
   replayNote = 'resumed',
@@ -1625,6 +1635,17 @@ export function App({
         );
         return;
       }
+      if (text === '/plugins' || text.startsWith('/plugins ')) {
+        setInput('');
+        pushItem({
+          kind: 'status',
+          text:
+            typeof listPlugins === 'function'
+              ? pluginsText(listPlugins(), text.slice('/plugins'.length), widthRef.current)
+              : 'no plugin list here',
+        });
+        return;
+      }
       if (text === '/models') {
         setInput('');
         if (modelsService === undefined) {
@@ -1834,6 +1855,7 @@ export function App({
       sessionEvents,
       modelsService,
       settingsService,
+      listPlugins,
       reminders,
       listCommands,
       listModels,

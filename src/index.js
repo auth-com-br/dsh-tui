@@ -25,6 +25,7 @@ import {
 import { refRows } from './refs.js';
 import { agentRows } from './agents.js';
 import { keyRefFor } from './models.js';
+import { inventory } from './plugins.js';
 import { configuredServers, toolsByServer, mcpText } from './mcp.js';
 
 /** Stable Cordis plugin name (bundle row id: tui-runner). */
@@ -566,6 +567,7 @@ async function run(ctx, exit) {
           removeRoute: route =>
             ctx.get('settings').mutate('llm-pi-ai', [{ op: 'unset', path: ['providers', route] }]),
         },
+        listPlugins: () => inventory(ctx.get('loader')?.entries?.() ?? []),
         settingsService: ctx.get('settings') && {
           describe: () => ctx.get('settings').describe(),
           mutate: (ns, ops) =>
