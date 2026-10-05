@@ -38,8 +38,9 @@ import { pluginsText } from './plugins.js';
 import { THEMES } from './theme.js';
 import { pathArg, imageLabel, contentText } from './attachments.js';
 import { parseRate, ratingText } from './feedback.js';
+import { layoutMarkdown } from './markdown.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
-import { userMessageBg, codeChipBg } from './utils.js';
+import { userMessageBg, codeChipBg, strWidth, clusters } from './utils.js';
 
 /** createElement shorthand. */
 const el = React.createElement;
@@ -212,24 +213,7 @@ export function helpText(commands) {
 
 // ── Width helpers (CJK-aware) ────────────────────────────────────────────
 
-const WIDE_RE =
-  /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6\u{1f1e6}-\u{1f1ff}\u{1f300}-\u{1faff}]/u;
-const ZERO_RE = /[\u0300-\u036f\u1ab0-\u1aff\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]/;
-
-function wcwidth(ch) {
-  if (ZERO_RE.test(ch)) {
-    return 0;
-  }
-  return WIDE_RE.test(ch) ? 2 : 1;
-}
-
-function strWidth(text) {
-  let w = 0;
-  for (const ch of text) {
-    w += wcwidth(ch);
-  }
-  return w;
-}
+// wcwidth, strWidth and clusters are utils.js's.
 
 /** Wrap `text` to `width` columns; returns an array of lines. Newlines split first. */
 function wrapText(text, width) {
@@ -248,8 +232,7 @@ function wrapText(text, width) {
     }
     let cur = '';
     let curW = 0;
-    for (const ch of part) {
-      const w = wcwidth(ch);
+    for (const { s: ch, w } of clusters(part)) {
       if (curW + w > width) {
         lines.push(cur);
         cur = '';
@@ -290,8 +273,7 @@ function truncate(text, max) {
   }
   let out = '';
   let w = 0;
-  for (const ch of text) {
-    const cw = wcwidth(ch);
+  for (const { s: ch, w: cw } of clusters(text)) {
     if (w + cw > max - 1) {
       break;
     }
@@ -439,41 +421,11 @@ function splitCodeBlocks(text) {
   return blocks;
 }
 
-/** Inline tokens: `code`, **bold**, *italic*. Returns Text children. */
-function renderInline(text, keyPrefix, chipBg) {
-  const nodes = [];
-  const re = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)/g;
-  let last = 0;
-  let match;
-  let key = 0;
-  while ((match = re.exec(text)) !== null) {
-    if (match.index > last) {
-      nodes.push(el(Text, { key: `${keyPrefix}-${key++}` }, text.slice(last, match.index)));
-    }
-    const token = match[0];
-    if (match[1] !== undefined) {
-      nodes.push(
-        el(Text, { key: `${keyPrefix}-${key++}`, backgroundColor: chipBg }, token.slice(1, -1)),
-      );
-    } else if (match[2] !== undefined) {
-      nodes.push(el(Text, { key: `${keyPrefix}-${key++}`, bold: true }, token.slice(2, -2)));
-    } else {
-      nodes.push(el(Text, { key: `${keyPrefix}-${key++}`, italic: true }, token.slice(1, -1)));
-    }
-    last = match.index + token.length;
-  }
-  if (last < text.length) {
-    nodes.push(el(Text, { key: `${keyPrefix}-${key++}` }, text.slice(last)));
-  }
-  return nodes;
-}
-
 /**
- * Markdown body for an assistant message. Headers keep their `#` signs
- * (bold), fenced blocks keep fences, plain text renders inline-styled.
- * Returns an array of rendered lines (one Text per line). `prefix` (e.g.
- * `• `) is applied to the first line only; later lines indent to the same
- * column, giving the Codex aligned-gutter look.
+ * Markdown body for an assistant message, laid out by markdown.js —
+ * headings, tables, rules, quotes, code — and drawn here segment by
+ * segment. `prefix` (e.g. `• `) goes on the first line; the rest indent to
+ * the same column, the Codex aligned-gutter look.
  */
 function markdownLines(text, width, indent = 2, chipBg = '#333333', prefix = '') {
   const pad = ' '.repeat(indent);
@@ -482,53 +434,27 @@ function markdownLines(text, width, indent = 2, chipBg = '#333333', prefix = '')
   // flush-left line (misaligned continuation, clipped tail).
   const gutterW = prefix !== '' ? strWidth(prefix) : indent;
   const avail = Math.max(1, width - gutterW);
-  const out = [];
-  let blockKey = 0;
-  let first = true;
-  const gutter = () => {
-    const g = first ? (prefix !== '' ? prefix : pad) : pad;
-    first = false;
-    return g;
-  };
-  for (const block of splitCodeBlocks(text)) {
-    if (block.type === 'code') {
-      // Keep fences verbatim; wrap long code lines.
-      for (const line of wrapText(block.content, avail)) {
-        out.push(el(Text, { key: `b${blockKey}`, wrap: 'wrap' }, gutter() + line));
-        blockKey += 1;
-      }
-    } else {
-      for (const rawLine of block.content.split('\n')) {
-        const trimmed = rawLine.replace(/^\s+/, '');
-        const isHeader = /^#{1,6}\s/.test(trimmed);
-        if (trimmed === '') {
-          out.push(el(Text, { key: `b${blockKey}`, wrap: 'wrap' }));
-          blockKey += 1;
-          continue;
-        }
-        const wrapped = wrapText(trimmed, avail);
-        for (const line of wrapped) {
-          if (isHeader) {
-            out.push(el(Text, { key: `b${blockKey}`, bold: true, wrap: 'wrap' }, gutter() + line));
-          } else {
-            out.push(
-              el(
-                Text,
-                { key: `b${blockKey}`, wrap: 'wrap' },
-                gutter(),
-                ...renderInline(line, `i${blockKey}`, chipBg),
-              ),
-            );
-          }
-          blockKey += 1;
-        }
-      }
-    }
-  }
-  if (out.length === 0) {
-    out.push(el(Text, { key: 'empty' }));
-  }
-  return out;
+  return layoutMarkdown(text, avail).map((segs, i) =>
+    el(
+      Text,
+      { key: `b${i}`, wrap: 'truncate-end' },
+      i === 0 && prefix !== '' ? prefix : pad,
+      ...segs.map((seg, j) =>
+        el(
+          Text,
+          {
+            key: j,
+            bold: seg.bold,
+            italic: seg.italic,
+            dimColor: seg.dim,
+            color: seg.heading ? ACCENT : undefined,
+            backgroundColor: seg.code ? chipBg : undefined,
+          },
+          seg.text,
+        ),
+      ),
+    ),
+  );
 }
 
 /** Body lines for a plain (non-markdown) message with a prefix. */
@@ -2307,12 +2233,7 @@ export function App({
 
 /** Line count of a markdown body as rendered by markdownLines(). */
 function markdownLineCount(text, width) {
-  const avail = Math.max(1, width - TRANSCRIPT_PAD - MARKDOWN_GUTTER);
-  let n = 0;
-  for (const block of splitCodeBlocks(String(text))) {
-    n += wrapText(block.content, avail).length;
-  }
-  return n;
+  return layoutMarkdown(String(text), Math.max(1, width - TRANSCRIPT_PAD - MARKDOWN_GUTTER)).length;
 }
 
 /**

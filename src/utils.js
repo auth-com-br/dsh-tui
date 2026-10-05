@@ -55,9 +55,14 @@ export const codeChipBg = bgHex => {
 
 // ── Width helpers (CJK-aware) ─────────────────────────────────────────────
 
+// Wide: CJK, fullwidth forms, and the emoji a terminal draws two columns
+// wide by default — the supplementary planes' and the BMP's emoji-
+// presentation characters (✅ ❌ ⌛ ⭐ …, East Asian Width W). Counting ✅ as
+// one column put a table's right border one column out on its row.
 const WIDE_RE =
-  /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6\u{1f1e6}-\u{1f1ff}\u{1f300}-\u{1faff}]/u;
-const ZERO_RE = /[\u0300-\u036f\u1ab0-\u1aff\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]/;
+  /[\u1100-\u115f\u231a\u231b\u23e9-\u23ec\u23f0\u23f3\u25fd\u25fe\u2614\u2615\u2648-\u2653\u267f\u2693\u26a1\u26aa\u26ab\u26bd\u26be\u26c4\u26c5\u26ce\u26d4\u26ea\u26f2\u26f3\u26f5\u26fa\u26fd\u2705\u270a\u270b\u2728\u274c\u274e\u2753-\u2755\u2757\u2795-\u2797\u27b0\u27bf\u2b1b\u2b1c\u2b50\u2b55\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6\u{1f1e6}-\u{1f1ff}\u{1f300}-\u{1faff}]/u;
+const ZERO_RE =
+  /[\u0300-\u036f\u1ab0-\u1aff\u1dc0-\u1dff\u200b-\u200f\u20d0-\u20ff\ufe00-\ufe0f\ufe20-\ufe2f\u{1f3fb}-\u{1f3ff}]/u;
 
 export function wcwidth(ch) {
   if (ZERO_RE.test(ch)) {
@@ -66,10 +71,37 @@ export function wcwidth(ch) {
   return WIDE_RE.test(ch) ? 2 : 1;
 }
 
+/**
+ * The text as the terminal draws it: clusters of a character and what
+ * joins it (variation selectors, skin tones, zero-width joiners and the
+ * character after one), each with its width. A text-default symbol with
+ * the emoji selector — ⚠️, ❤️ — is drawn two columns wide.
+ * @param {string} text
+ * @returns {Array<{s: string, w: number}>}
+ */
+export function clusters(text) {
+  const out = [];
+  let joining = false;
+  for (const ch of text) {
+    const last = out[out.length - 1];
+    if (last !== undefined && (joining || ZERO_RE.test(ch) || ch === '\u200d')) {
+      last.s += ch;
+      if (ch === '\ufe0f' && last.w === 1) {
+        last.w = 2;
+      }
+      joining = ch === '\u200d';
+      continue;
+    }
+    joining = false;
+    out.push({ s: ch, w: wcwidth(ch) });
+  }
+  return out;
+}
+
 export function strWidth(text) {
   let w = 0;
-  for (const ch of text) {
-    w += wcwidth(ch);
+  for (const c of clusters(text)) {
+    w += c.w;
   }
   return w;
 }
