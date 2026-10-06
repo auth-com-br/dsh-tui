@@ -47,6 +47,21 @@ export const inject = ['agentDefaultModel', 'agents', 'sessions', 'sessionPersis
  * Events are dropped until the App mounts.
  */
 let uiHandler = undefined;
+
+const ENTER_SCREEN = '\x1b[?1049h\x1b[?1007h\x1b[2J\x1b[H';
+let screenLeft = false;
+/** The main screen again, once, however the TUI ends. */
+function leaveScreen() {
+  if (screenLeft || !process.stdout.isTTY) {
+    return;
+  }
+  screenLeft = true;
+  try {
+    process.stdout.write('\x1b[?1007l\x1b[?1049l');
+  } catch {
+    // The terminal has gone.
+  }
+}
 function forward(eventOrHandler) {
   if (typeof eventOrHandler === 'function' || eventOrHandler == null) {
     uiHandler = typeof eventOrHandler === 'function' ? eventOrHandler : undefined;
@@ -102,6 +117,14 @@ async function run(ctx, exit) {
     (args.error ? console.error : console.log)(args.error ?? USAGE);
     exit(args.error ? 2 : 0);
     return;
+  }
+
+  // The alternate screen from here, before the loader settles: the MCP
+  // servers start meanwhile, and a stdio one's banner on its inherited
+  // stderr then lands on the screen the TUI clears, not on the shell's.
+  if (process.stdout.isTTY) {
+    process.stdout.write(ENTER_SCREEN);
+    process.once('exit', leaveScreen);
   }
 
   // Probe the terminal background BEFORE Ink mounts: Ink's key parser would
@@ -262,7 +285,8 @@ async function run(ctx, exit) {
         // The App already unmounted itself via useApp().exit().
       }
     }
-    // How to come back, under the last frame.
+    // The shell's screen back, then how to come back on it.
+    leaveScreen();
     try {
       const note = resumeNote(current.agent.session.id, current.agent.session.snapshotEvents());
       if (note !== '') {
@@ -744,12 +768,18 @@ async function run(ctx, exit) {
       { exitOnCtrlC: false, incrementalRendering: true },
     );
   };
-  // A stdio MCP server's stderr is the harness's — the MCP SDK spawns it
-  // inherited, and dsh-mcp-client has no setting for it — so its banner
-  // ("… running on stdio") is on the screen before the TUI draws. The
-  // servers connect before the loader settles, so clearing once here takes
-  // it away.
+  // The alternate screen, as a full-screen program takes it (less, vim,
+  // OpenCode): the TUI has the whole screen, clean, and quitting gives the
+  // shell back as it was. Drawn on the main screen, an earlier run's frames
+  // and a stdio MCP server's banner ("… running on stdio": its stderr is
+  // inherited, with no setting in dsh-mcp-client) were left above it.
+  //
+  // With it, 1007: the terminal sends the wheel as the arrow keys, which
+  // scroll the transcript — the TUI redraws in place, so its past is not in
+  // the terminal's scrollback for the wheel to find — without taking the
+  // mouse, so selecting text still works.
   if (process.stdout.isTTY) {
+    // Whatever was written on it while the harness loaded.
     process.stdout.write('\x1b[2J\x1b[H');
   }
   mount();

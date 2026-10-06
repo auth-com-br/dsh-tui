@@ -68,6 +68,9 @@ function BrailleSpinner() {
   return el(Text, null, BRAILLE_FRAMES[frame]);
 }
 
+/** How far ↑/↓ — and a notch of the wheel, sent as them — scroll. */
+const ARROW_LINES = 3;
+
 /** Caps. */
 const MAX_ITEMS = 500;
 const MAX_TOOL_ARGS = 160;
@@ -888,7 +891,8 @@ export function App({
   const nextItemId = useRef(1);
   const visibleRef = useRef([]);
   // The side panel (sidebar.js): auto on a wide terminal, /sidebar sets it.
-  const [sidebarPref, setSidebarPref] = useState('auto');
+  // On, as OpenCode keeps it: shown whenever the terminal has the room.
+  const [sidebarPref, setSidebarPref] = useState('on');
   const [modelWindow, setModelWindow] = useState(undefined);
   const [sessionTitle, setSessionTitle] = useState(undefined);
   const [sessionFiles, setSessionFiles] = useState([]);
@@ -1223,10 +1227,16 @@ export function App({
           });
         }
       }
-    } else if (key.upArrow || key.pageUp) {
+    } else if (key.pageUp) {
       setScrollLines(v => v + viewportStep.current);
-    } else if (key.downArrow || key.pageDown) {
+    } else if (key.pageDown) {
       setScrollLines(v => Math.max(0, v - viewportStep.current));
+    } else if (key.upArrow) {
+      // Three lines, as a notch of the wheel goes: the terminal sends the
+      // wheel as these (1007), and half a screen a notch lost the place.
+      setScrollLines(v => v + ARROW_LINES);
+    } else if (key.downArrow) {
+      setScrollLines(v => Math.max(0, v - ARROW_LINES));
     }
   });
 
