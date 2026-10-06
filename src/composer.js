@@ -38,7 +38,10 @@ export function editKey(line, input, key) {
   const p = parts(line.text);
   const at = Math.min(line.cursor, p.length);
   const make = (list, cursor) => ({ line: { text: list.join(''), cursor } });
-  if (key.return) {
+  // A line feed alone is Enter too: a program the agent started can turn
+  // the terminal's icrnl on, and then Enter arrives as \n — Ink's "enter",
+  // not its "return" — and nothing could be sent.
+  if (key.return || input === '\n') {
     return { line, submit: line.text };
   }
   if (key.upArrow || key.downArrow || key.tab || key.escape) {

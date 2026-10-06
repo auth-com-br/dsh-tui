@@ -73,3 +73,7 @@ test('the character under the cursor is drawn apart, a space at the end', () => 
     after: '',
   });
 });
+
+test('Enter arriving as a line feed (icrnl turned on by a child) still sends', () => {
+  assert.equal(editKey({ text: 'hi', cursor: 2 }, '\n', {}).submit, 'hi');
+});

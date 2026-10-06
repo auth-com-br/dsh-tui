@@ -575,6 +575,22 @@ async function run(ctx, exit) {
             ctx.get('settings').mutate('llm-pi-ai', [{ op: 'unset', path: ['providers', route] }]),
         },
         listPlugins: () => inventory(ctx.get('loader')?.entries?.() ?? []),
+        // Raw mode again, for a terminal a program the agent started has
+        // changed under the TUI (icrnl on made Enter arrive as \n and send
+        // nothing). Off then on: libuv skips a mode it thinks it is in, and
+        // it cannot see a change made by another process.
+        reassertRawMode: () => {
+          const stdin = process.stdin;
+          if (!stdin.isTTY || typeof stdin.setRawMode !== 'function' || !stdin.isRaw) {
+            return;
+          }
+          try {
+            stdin.setRawMode(false);
+            stdin.setRawMode(true);
+          } catch {
+            // The terminal has gone; there is nothing to set.
+          }
+        },
         // The side panel's context window: the selected model's.
         contextWindow: async () => {
           const now = selected.current;

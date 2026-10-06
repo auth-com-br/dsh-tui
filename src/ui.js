@@ -842,6 +842,7 @@ export function App({
   attachImage,
   feedback,
   contextWindow,
+  reassertRawMode,
 }) {
   // The message that closed the last turn: what /rate rates.
   const lastAnswerId = useRef(undefined);
@@ -928,10 +929,15 @@ export function App({
     if (typeof listJobs !== 'function' || typeof onJobsChanged !== 'function') {
       return undefined;
     }
-    const refresh = () => setJobs(listJobs());
+    const refresh = () => {
+      setJobs(listJobs());
+      // A job starting or ending is a program that may have changed the
+      // terminal's modes (a server left running in the background).
+      reassertRawMode?.();
+    };
     refresh();
     return onJobsChanged(refresh);
-  }, [listJobs, onJobsChanged]);
+  }, [listJobs, onJobsChanged, reassertRawMode]);
   const viewportStep = useRef(5);
   const [, setTick] = useState(0); // drives the Working elapsed timer
   const usageRef = useRef(null);
@@ -1302,6 +1308,10 @@ export function App({
           break;
         case 'turn/end': {
           setBusy(false);
+          // The turn's programs may have changed the terminal's modes.
+          if (!replaying.current) {
+            reassertRawMode?.();
+          }
           turnStart.current = undefined;
           clearHint();
           const reason = data.reason && typeof data.reason === 'object' ? data.reason : {};
