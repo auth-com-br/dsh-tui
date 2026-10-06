@@ -39,6 +39,8 @@ import { THEMES } from './theme.js';
 import { pathArg, imageLabel, contentText } from './attachments.js';
 import { parseRate, ratingText } from './feedback.js';
 import { layoutMarkdown } from './markdown.js';
+import { newSpeed, foldSpeed, liveRate, fmtRate, totalsText } from './speed.js';
+import { foldInstructions, changesText, instructionsText } from './instructions.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg, strWidth, clusters } from './utils.js';
 
@@ -93,6 +95,11 @@ const TUI_COMMANDS = [
   { name: 'agents', description: "watch this session's subagents", kind: 'command' },
   { name: 'jobs', description: "this session's background jobs", kind: 'command' },
   { name: 'schedule', description: "this session's reminders", kind: 'command' },
+  {
+    name: 'instructions',
+    description: 'the AGENTS.md / CLAUDE.md files the agent works from',
+    kind: 'command',
+  },
   {
     name: 'settings',
     description: "the plugins' settings: list, set or reset a field",
@@ -161,6 +168,7 @@ const HELP_TEXT = [
   "  /agents       watch this session's subagents (read-only)",
   "  /jobs         this session's background jobs",
   "  /schedule     this session's reminders (overlays/schedule.yml)",
+  '  /instructions  the AGENTS.md / CLAUDE.md files the agent works from',
   '  /models       model providers: API keys, add a server (local or remote)',
   "  /settings [ns.field value]  the plugins' settings; reset ns.field undoes",
   '  /plugins [filter]  what the harness loaded, failures first',
@@ -551,7 +559,11 @@ function ChatRow({ item, width, thinkingOpen, themeBg }) {
       }
       if (item.usage) {
         lines.push(
-          el(Text, { key: 'usage', dimColor: true, wrap: 'wrap' }, `  ${usageText(item.usage)}`),
+          el(
+            Text,
+            { key: 'usage', dimColor: true, wrap: 'wrap' },
+            `  ${usageText(item.usage)}${item.rate ? ` · ${fmtRate(item.rate)}` : ''}`,
+          ),
         );
       }
       if (lines.length === 0) {
@@ -839,6 +851,11 @@ export function App({
   // The files this turn changed, shown when it ends (deliverables.js).
   const deliverables = useRef(newDeliverables());
   const workflowRuns = useRef(new Map());
+  // Tokens spent and the model's speed (speed.js); totals is the footer's.
+  const speed = useRef(newSpeed());
+  const [totals, setTotals] = useState(speed.current.totals);
+  // The instruction files the agent has (instructions.js).
+  const instructionFiles = useRef(new Map());
   // The session's reminders, folded from its schedule/change events.
   const [reminders, setReminders] = useState([]);
   // The session's background jobs, as the registry says they changed.
@@ -870,6 +887,17 @@ export function App({
   // For handlers that outlive a render (handleEvent is memoised).
   const widthRef = useRef(width);
   widthRef.current = width;
+
+  // A resized terminal is a new height for the frame, and new widths for
+  // every line: drawn again at once rather than at the next key.
+  useEffect(() => {
+    if (!stdout) {
+      return undefined;
+    }
+    const onResize = () => setTick(v => v + 1);
+    stdout.on('resize', onResize);
+    return () => stdout.off('resize', onResize);
+  }, [stdout]);
 
   // Working elapsed timer while busy.
   useEffect(() => {
@@ -1108,6 +1136,15 @@ export function App({
       const data = event.data && typeof event.data === 'object' ? event.data : {};
       setStanding(s => foldStanding(s, event));
       deliverables.current = foldDeliverables(deliverables.current, event);
+      speed.current = foldSpeed(speed.current, event, Date.now());
+      const instr = foldInstructions(instructionFiles.current, event);
+      if (instr.changed.length > 0) {
+        instructionFiles.current = instr.files;
+        pushItem({ kind: 'status', text: changesText(instr.changed) });
+      }
+      if (event.type === 'assistant/message') {
+        setTotals(speed.current.totals);
+      }
       setReminders(r => foldSchedule(r, event));
       // A workflow run is one block in the transcript, redrawn as its
       // members start and end.
@@ -1245,6 +1282,7 @@ export function App({
             text: blocksText(content, 'text'),
             reasoning: blocksText(content, 'reasoning'),
             usage: itemUsage,
+            rate: speed.current.rate,
           });
           break;
         }
@@ -1739,6 +1777,11 @@ export function App({
         );
         return;
       }
+      if (text === '/instructions') {
+        setInput('');
+        pushItem({ kind: 'status', text: instructionsText(instructionFiles.current) });
+        return;
+      }
       if (text === '/schedule') {
         setInput('');
         pushItem({ kind: 'status', text: scheduleText(reminders, Date.now()) });
@@ -2086,6 +2129,9 @@ export function App({
           { dimColor: true },
           ` ${turnStart.current !== undefined ? fmtElapsedCompact(Date.now() - turnStart.current) : ''}`,
         ),
+        ...(liveRate(speed.current, Date.now()) !== undefined
+          ? [el(Text, { dimColor: true }, ` · ~${fmtRate(liveRate(speed.current, Date.now()))}`)]
+          : []),
         ...(idleSeconds >= 15
           ? [
               el(
@@ -2179,7 +2225,8 @@ export function App({
               ),
             );
 
-  const hintLeft = `  ${modelLabel} · ${shortCwd}`;
+  const spent = totalsText(totals);
+  const hintLeft = `  ${modelLabel}${spent ? ` · ${spent}` : ''} · ${shortCwd}`;
   const hintRightParts = [];
   if (hint !== null) {
     hintRightParts.push(hint);
@@ -2196,14 +2243,23 @@ export function App({
   const hintRow = el(
     Box,
     { paddingLeft: 1, paddingRight: 1, flexDirection: 'row' },
-    el(Text, { dimColor: true }, hintLeft),
-    el(Box, { flexGrow: 1 }),
-    el(Text, { dimColor: true }, hintRightParts.join('   ')),
+    // One line, the folder cut first: a footer that wrapped took a second
+    // line and pushed the composer up from the foot of the terminal.
+    el(
+      Box,
+      { flexShrink: 1, flexGrow: 1 },
+      el(Text, { dimColor: true, wrap: 'truncate-end' }, hintLeft),
+    ),
+    el(Text, { dimColor: true, wrap: 'truncate-start' }, '  ' + hintRightParts.join('   ')),
   );
 
   return el(
     Box,
-    { flexDirection: 'column', height: '100%' },
+    // The terminal's height, not 100%: Ink sizes 100% to the content, so a
+    // short conversation left the composer under it, mid-screen, instead of
+    // at the foot of the terminal. A frame exactly the terminal's height is
+    // not redrawn whole by Ink; one taller would be.
+    { flexDirection: 'column', height: rows },
     el(
       Box,
       {
