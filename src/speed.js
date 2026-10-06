@@ -17,7 +17,12 @@
 export const CHARS_PER_TOKEN = 4;
 
 /** @typedef {{input: number, output: number, cache: number}} Totals */
-/** @typedef {{first?: number, chars: number, totals: Totals, rate?: number}} Speed */
+/**
+ * @typedef {{first?: number, chars: number, totals: Totals, rate?: number, context?: number}} Speed
+ * context: how full the model's context is, as of the last step: what it
+ * was sent (new, cached and cache-written tokens) and what it answered,
+ * which the next request carries.
+ */
 
 /** @returns {Speed} */
 export function newSpeed() {
@@ -55,9 +60,14 @@ export function foldSpeed(s, event, now) {
       const u = d.usage ?? {};
       const out = Number.isFinite(u.outputTokens) ? u.outputTokens : 0;
       const seconds = s.first === undefined ? 0 : (t - s.first) / 1000;
+      const sent =
+        (Number.isFinite(u.inputTokens) ? u.inputTokens : 0) +
+        (Number.isFinite(u.cacheReadTokens) ? u.cacheReadTokens : 0) +
+        (Number.isFinite(u.cacheWriteTokens) ? u.cacheWriteTokens : 0);
       return {
         ...s,
         rate: out > 0 && seconds >= 0.2 ? out / seconds : undefined,
+        context: sent + out > 0 ? sent + out : s.context,
         totals: {
           input: s.totals.input + (Number.isFinite(u.inputTokens) ? u.inputTokens : 0),
           output: s.totals.output + out,

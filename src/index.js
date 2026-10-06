@@ -575,6 +575,16 @@ async function run(ctx, exit) {
             ctx.get('settings').mutate('llm-pi-ai', [{ op: 'unset', path: ['providers', route] }]),
         },
         listPlugins: () => inventory(ctx.get('loader')?.entries?.() ?? []),
+        // The side panel's context window: the selected model's.
+        contextWindow: async () => {
+          const now = selected.current;
+          if (now === undefined) {
+            return undefined;
+          }
+          const info = await ctx.get('llm')?.resolveModelInfo?.(now.provider, now.model);
+          // LlmResolvedModelInfo: the window is under context.
+          return info?.context?.contextWindow;
+        },
         // /rate (dsh-message-feedback): a result is { ok, value | error }.
         feedback: ctx.get('messageFeedback') && {
           get: async messageId => {

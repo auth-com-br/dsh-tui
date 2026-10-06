@@ -41,6 +41,7 @@ import { parseRate, ratingText } from './feedback.js';
 import { layoutMarkdown } from './markdown.js';
 import { newSpeed, foldSpeed, liveRate, fmtRate, totalsText } from './speed.js';
 import { foldInstructions, changesText, instructionsText } from './instructions.js';
+import { SIDEBAR_WIDTH, sidebarShown, sidebarLines } from './sidebar.js';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { userMessageBg, codeChipBg, strWidth, clusters } from './utils.js';
 
@@ -95,6 +96,20 @@ const TUI_COMMANDS = [
   { name: 'agents', description: "watch this session's subagents", kind: 'command' },
   { name: 'jobs', description: "this session's background jobs", kind: 'command' },
   { name: 'schedule', description: "this session's reminders", kind: 'command' },
+  {
+    name: 'thinking',
+    description: 'open or fold every thought',
+    kind: 'command',
+    takesInput: true,
+    hint: 'all | none',
+  },
+  {
+    name: 'sidebar',
+    description: 'the side panel: context used, tokens, files',
+    kind: 'command',
+    takesInput: true,
+    hint: '[on|off|auto]',
+  },
   {
     name: 'instructions',
     description: 'the AGENTS.md / CLAUDE.md files the agent works from',
@@ -169,6 +184,8 @@ const HELP_TEXT = [
   "  /jobs         this session's background jobs",
   "  /schedule     this session's reminders (overlays/schedule.yml)",
   '  /instructions  the AGENTS.md / CLAUDE.md files the agent works from',
+  '  /thinking all|none  open or fold every thought (ctrl+t: the lowest on screen)',
+  '  /sidebar [on|off|auto]  the side panel: context used, tokens, files',
   '  /models       model providers: API keys, add a server (local or remote)',
   "  /settings [ns.field value]  the plugins' settings; reset ns.field undoes",
   '  /plugins [filter]  what the harness loaded, failures first',
@@ -824,6 +841,7 @@ export function App({
   setTheme,
   attachImage,
   feedback,
+  contextWindow,
 }) {
   // The message that closed the last turn: what /rate rates.
   const lastAnswerId = useRef(undefined);
@@ -858,7 +876,21 @@ export function App({
   const [hint, setHint] = useState(null);
   // Thinking is folded by default: a local model thinks at length, and the
   // answer under its thought was pushed off the screen by it.
-  const [thinkingOpen, setThinkingOpen] = useState(false);
+  // Thoughts are folded; one is opened by ctrl+t on it (the lowest one on
+  // screen), every one by /thinking all.
+  const [openThoughts, setOpenThoughts] = useState(() => new Set());
+  const [allThoughts, setAllThoughts] = useState(false);
+  const thoughtOpen = useCallback(
+    item => allThoughts || openThoughts.has(item?.id),
+    [allThoughts, openThoughts],
+  );
+  const nextItemId = useRef(1);
+  const visibleRef = useRef([]);
+  // The side panel (sidebar.js): auto on a wide terminal, /sidebar sets it.
+  const [sidebarPref, setSidebarPref] = useState('auto');
+  const [modelWindow, setModelWindow] = useState(undefined);
+  const [sessionTitle, setSessionTitle] = useState(undefined);
+  const [sessionFiles, setSessionFiles] = useState([]);
   const [scrollLines, setScrollLines] = useState(0);
   // Approval requests waiting for the user, oldest first: the first is the
   // one shown. Each carries the resolve of the harness's waiting request.
@@ -913,12 +945,31 @@ export function App({
   const lastEventAt = useRef(Date.now());
   const { exit: inkExit } = useApp();
   const { stdout } = useStdout();
-  const cols = stdout?.columns ?? 100;
+  const termCols = stdout?.columns ?? 100;
   const rows = stdout?.rows ?? 30;
+  const showSidebar = sidebarShown(sidebarPref, termCols);
+  // The conversation's columns: the terminal's, less the panel's.
+  const cols = showSidebar ? termCols - SIDEBAR_WIDTH : termCols;
   const width = Math.max(20, cols - 2);
   // For handlers that outlive a render (handleEvent is memoised).
   const widthRef = useRef(width);
   widthRef.current = width;
+
+  // The model's context window, for the panel: asked again when the model
+  // changes.
+  useEffect(() => {
+    if (typeof contextWindow !== 'function') {
+      return undefined;
+    }
+    let live = true;
+    Promise.resolve(contextWindow()).then(
+      w => live && setModelWindow(w),
+      () => live && setModelWindow(undefined),
+    );
+    return () => {
+      live = false;
+    };
+  }, [contextWindow, modelLabel]);
 
   // A resized terminal is a new height for the frame, and new widths for
   // every line: drawn again at once rather than at the next key.
@@ -942,7 +993,9 @@ export function App({
 
   /** Append one transcript entry, dropping the oldest rows past MAX_ITEMS. */
   const pushItem = useCallback(item => {
-    setItems(prev => [...prev.slice(-(MAX_ITEMS - 1)), item]);
+    // An id of its own, by which a thought is opened alone.
+    const withId = item.id === undefined ? { ...item, id: nextItemId.current++ } : item;
+    setItems(prev => [...prev.slice(-(MAX_ITEMS - 1)), withId]);
   }, []);
 
   const clearHint = useCallback(() => {
@@ -1145,7 +1198,25 @@ export function App({
     } else if (key.escape) {
       setScrollLines(0);
     } else if (key.ctrl && input === 't') {
-      setThinkingOpen(v => !v);
+      // The lowest thought on screen: the latest at the foot, an older one
+      // scrolled to. With every thought open, ctrl+t folds them all.
+      if (allThoughts) {
+        setAllThoughts(false);
+        setOpenThoughts(new Set());
+      } else {
+        const target = [...visibleRef.current].reverse().find(i => i.reasoning);
+        if (target !== undefined) {
+          setOpenThoughts(prev => {
+            const next = new Set(prev);
+            if (next.has(target.id)) {
+              next.delete(target.id);
+            } else {
+              next.add(target.id);
+            }
+            return next;
+          });
+        }
+      }
     } else if (key.upArrow || key.pageUp) {
       setScrollLines(v => v + viewportStep.current);
     } else if (key.downArrow || key.pageDown) {
@@ -1169,6 +1240,9 @@ export function App({
       setStanding(s => foldStanding(s, event));
       deliverables.current = foldDeliverables(deliverables.current, event);
       speed.current = foldSpeed(speed.current, event, Date.now());
+      if (event.type === 'session/title' && typeof data.title === 'string') {
+        setSessionTitle(data.title);
+      }
       const instr = foldInstructions(instructionFiles.current, event);
       if (instr.changed.length > 0) {
         instructionFiles.current = instr.files;
@@ -1267,6 +1341,13 @@ export function App({
             parts.push('/retry to try again');
           }
           const text = parts.join(' · ');
+          const base = `${process.cwd()}/`;
+          const produced = deliverables.current.produced.map(f =>
+            f.startsWith(base) ? f.slice(base.length) : f,
+          );
+          if (produced.length > 0) {
+            setSessionFiles(prev => [...prev.filter(f => !produced.includes(f)), ...produced]);
+          }
           const changed = deliverablesText(
             deliverables.current.produced,
             process.cwd(),
@@ -1809,6 +1890,30 @@ export function App({
         );
         return;
       }
+      if (text === '/thinking' || text.startsWith('/thinking ')) {
+        setInput('');
+        const arg = text.slice('/thinking'.length).trim();
+        if (arg === 'all') {
+          setAllThoughts(true);
+        } else if (arg === 'none') {
+          setAllThoughts(false);
+          setOpenThoughts(new Set());
+        } else {
+          pushItem({
+            kind: 'status',
+            text: 'ctrl+t opens or folds the lowest thought on screen · /thinking all · /thinking none',
+          });
+        }
+        return;
+      }
+      if (text === '/sidebar' || text.startsWith('/sidebar ')) {
+        setInput('');
+        const arg = text.slice('/sidebar'.length).trim();
+        setSidebarPref(prev =>
+          ['on', 'off', 'auto'].includes(arg) ? arg : sidebarShown(prev, termCols) ? 'off' : 'on',
+        );
+        return;
+      }
       if (text === '/instructions') {
         setInput('');
         pushItem({ kind: 'status', text: instructionsText(instructionFiles.current) });
@@ -2007,6 +2112,7 @@ export function App({
       listPlugins,
       theme,
       setTheme,
+      termCols,
       attachImage,
       feedback,
       reminders,
@@ -2059,12 +2165,13 @@ export function App({
     scrollLines,
     busy,
     todos,
-    thinkingOpen,
+    thinkingOpen: thoughtOpen,
     composerExtra: composerExtra + standingShown.length,
     room,
-    streamLines: estimateStreamLines(stream, width, thinkingOpen),
+    streamLines: estimateStreamLines(stream, width, allThoughts),
   });
   const { visible, scrollLines: clampedLines, atBottom, step, overflowTop } = viewport;
+  visibleRef.current = visible;
   useEffect(() => {
     viewportStep.current = step;
   }, [step]);
@@ -2156,10 +2263,10 @@ export function App({
       { resetKey: items.length },
       welcome,
       ...visible.map((item, index) =>
-        el(ChatRow, { key: index, item, width, thinkingOpen, themeBg }),
+        el(ChatRow, { key: index, item, width, thinkingOpen: thoughtOpen(item), themeBg }),
       ),
       ...(clampedLines === 0
-        ? [el(StreamBlock, { key: 'stream', stream, width, thinkingOpen, themeBg })]
+        ? [el(StreamBlock, { key: 'stream', stream, width, thinkingOpen: allThoughts, themeBg })]
         : []),
     ),
   );
@@ -2299,7 +2406,7 @@ export function App({
   if (badge !== '') {
     hintRightParts.push(badge);
   }
-  hintRightParts.push(thinkingOpen ? 'ctrl + t: hide thinking' : 'ctrl + t: show thinking');
+  hintRightParts.push('ctrl+t thought');
   hintRightParts.push('ctrl + c quit');
   const hintRow = el(
     Box,
@@ -2314,13 +2421,68 @@ export function App({
     el(Text, { dimColor: true, wrap: 'truncate-start' }, '  ' + hintRightParts.join('   ')),
   );
 
-  return el(
+  const sidebar = showSidebar
+    ? el(
+        Box,
+        {
+          width: SIDEBAR_WIDTH,
+          height: rows,
+          flexShrink: 0,
+          flexDirection: 'column',
+          borderStyle: 'single',
+          borderTop: false,
+          borderRight: false,
+          borderBottom: false,
+          borderColor: 'gray',
+          paddingLeft: 1,
+          paddingRight: 1,
+          overflow: 'hidden',
+        },
+        ...sidebarLines(
+          {
+            title: sessionTitle,
+            model: modelLabel,
+            context: speed.current.context,
+            window: modelWindow,
+            totals,
+            rate: speed.current.rate,
+            files: sessionFiles,
+            instructions: [...instructionFiles.current.keys()],
+            standing: standingLines(standing, SIDEBAR_WIDTH - 3).map(l => l.text.trim()),
+          },
+          SIDEBAR_WIDTH - 3,
+        ).map((line, i) =>
+          el(
+            Text,
+            {
+              key: i,
+              wrap: 'truncate',
+              bold: line.style === 'title' || line.style === 'label',
+              dimColor: line.style === 'dim',
+              color:
+                line.style === 'label'
+                  ? ACCENT
+                  : line.style === 'alert'
+                    ? ERR
+                    : line.style === 'warn'
+                      ? 'yellow'
+                      : line.style === 'ok'
+                        ? OK
+                        : undefined,
+            },
+            line.text === '' ? ' ' : line.text,
+          ),
+        ),
+      )
+    : null;
+
+  const main = el(
     Box,
     // The terminal's height, not 100%: Ink sizes 100% to the content, so a
     // short conversation left the composer under it, mid-screen, instead of
     // at the foot of the terminal. A frame exactly the terminal's height is
     // not redrawn whole by Ink; one taller would be.
-    { flexDirection: 'column', height: rows },
+    { flexDirection: 'column', height: rows, width: cols, flexShrink: 0 },
     el(
       Box,
       {
@@ -2357,6 +2519,7 @@ export function App({
     el(Box, { flexShrink: 0, flexDirection: 'column' }, inputRow),
     el(Box, { flexShrink: 0, height: 1 }, hintRow),
   );
+  return el(Box, { flexDirection: 'row', height: rows }, main, sidebar);
 }
 
 // ── Viewport math (pure, exported for tests) ───────────────────────────────
@@ -2441,7 +2604,14 @@ export function computeViewport({
   room,
   streamLines = 0,
 }) {
-  const heights = items.map(item => estimateItemLines(item, width, thinkingOpen));
+  // thinkingOpen: one for all, or by item.
+  const heights = items.map(item =>
+    estimateItemLines(
+      item,
+      width,
+      typeof thinkingOpen === 'function' ? thinkingOpen(item) : thinkingOpen,
+    ),
+  );
   const totalLines = heights.reduce((a, b) => a + b, 0);
   // Chrome rows: status row (busy) + scroll hint + composer + footer +
   // empty-state banner + todo panel, and whatever the composer grew by.
