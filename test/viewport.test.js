@@ -98,11 +98,14 @@ describe('computeViewport', () => {
   });
 
   test('overscroll is clamped to maxScroll and reports atTop', () => {
-    const v = computeViewport({ ...BASE, items: mkItems(5), scrollLines: 99999 });
+    const v = computeViewport({ ...BASE, items: mkItems(200), scrollLines: 99999 });
     assert.equal(v.scrollLines, v.maxScroll);
     assert.equal(v.atTop, true);
     assert.equal(v.atBottom, false);
     assert.ok(v.visible.length >= 1, 'the top of the transcript stays visible');
+    // A transcript that fits has nothing to scroll.
+    const fits = computeViewport({ ...BASE, items: mkItems(2), scrollLines: 10 });
+    assert.equal(fits.scrollLines, 0);
   });
 
   test('maxScroll is never negative', () => {
@@ -175,7 +178,7 @@ describe('computeViewport', () => {
     assert.equal(v.overflowTop, true);
   });
 
-  test('scrolled up into a message taller than the screen, its head shows', () => {
+  test('scrolled up into a message taller than the screen, it moves a line a line', () => {
     const long = {
       kind: 'assistant',
       text: Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n'),
@@ -187,7 +190,11 @@ describe('computeViewport', () => {
     ];
     const v = computeViewport({ ...BASE, items, scrollLines: 40 });
     assert.ok(v.visible.includes(long));
-    assert.equal(v.overflowTop, false, 'laid out from the top, so the head is in view');
+    assert.equal(v.visible.at(-1), long, 'the window ends inside the long message');
+    // By lines: the status row below and 39 lines of the message's end are
+    // under the window, so each line scrolled moves the view by one.
+    const one = computeViewport({ ...BASE, items, scrollLines: 41 });
+    assert.equal(one.cutBottom, v.cutBottom + 1);
   });
 
   test('messages that fit are not marked as overflowing', () => {
@@ -249,5 +256,21 @@ describe('width chain stays aligned with the render layout', () => {
     assert.equal(estimateItemLines({ kind: 'user', text: 'x'.repeat(25) }, 30), 2);
     assert.equal(estimateItemLines({ kind: 'assistant', text: 'x'.repeat(26) }, 30), 2);
     assert.equal(estimateItemLines({ kind: 'assistant', text: 'x'.repeat(27) }, 30), 3);
+  });
+});
+
+describe('scrollbarRows', () => {
+  test('the thumb is as tall as the room is of the content, and goes up as the window does', async () => {
+    const { scrollbarRows } = await import('../src/ui.js');
+    assert.deepEqual(scrollbarRows(10, 8, 0), [], 'nothing to scroll, no bar');
+    const bottom = scrollbarRows(10, 40, 0);
+    assert.equal(bottom.filter(Boolean).length, 3);
+    assert.deepEqual(
+      bottom.slice(-3),
+      [true, true, true],
+      'at the bottom, the thumb is at the bottom',
+    );
+    const top = scrollbarRows(10, 40, 30);
+    assert.deepEqual(top.slice(0, 3), [true, true, true], 'at the top, the thumb is at the top');
   });
 });

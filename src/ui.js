@@ -537,7 +537,9 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-function ChatRow({ item, width, thinkingOpen, themeBg }) {
+// Memoised: a row whose item, width, fold and theme are unchanged is not
+// drawn again — a turn of the wheel re-rendered every row on screen.
+const ChatRow = React.memo(function ChatRow({ item, width, thinkingOpen, themeBg }) {
   switch (item.kind) {
     case 'user': {
       // Faint derived background + cyan ▌ prefix (Codex user-message style).
@@ -670,7 +672,7 @@ function ChatRow({ item, width, thinkingOpen, themeBg }) {
         item.text,
       );
   }
-}
+});
 
 // ── Thinking ─────────────────────────────────────────────────────────────
 
@@ -2190,7 +2192,7 @@ export function App({
     room,
     streamLines: estimateStreamLines(stream, width, allThoughts),
   });
-  const { visible, scrollLines: clampedLines, atBottom, step, overflowTop } = viewport;
+  const { visible, scrollLines: clampedLines, atBottom, step, cutBottom, totalLines } = viewport;
   visibleRef.current = visible;
   useEffect(() => {
     viewportStep.current = step;
@@ -2277,7 +2279,9 @@ export function App({
     // flexShrink 0: shrunk to the room, it let its content run out below
     // it, so laying the room out from its bottom showed the head of the
     // last answer — the thinking — and not its end, the answer itself.
-    { flexDirection: 'column', paddingLeft: 1, paddingRight: 1, flexShrink: 0 },
+    // marginBottom: the lines of the window's last item that are below the
+    // window, scrolled up into it. The right column is the scrollbar's.
+    { flexDirection: 'column', paddingLeft: 1, flexShrink: 0, marginBottom: -cutBottom },
     el(
       ErrorBoundary,
       { resetKey: items.length },
@@ -2505,18 +2509,27 @@ export function App({
     { flexDirection: 'column', height: rows, width: cols, flexShrink: 0 },
     el(
       Box,
-      {
-        height: room,
-        flexShrink: 0,
-        flexDirection: 'column',
-        overflow: 'hidden',
-        // Laid out from the bottom at the latest, and while the top item
-        // overflows, so the rendered height — not the estimate — decides
-        // what is cut, and it is the head of what is too tall rather than
-        // the end of the answer streaming in.
-        justifyContent: atBottom || overflowTop ? 'flex-end' : 'flex-start',
-      },
-      transcript,
+      { height: room, flexShrink: 0, flexDirection: 'row' },
+      el(
+        Box,
+        {
+          flexGrow: 1,
+          flexDirection: 'column',
+          overflow: 'hidden',
+          // Laid out from the bottom always: what is cut is the head of what
+          // is too tall, and scrolled up, the window's last item is moved
+          // down by what of it is below the window (cutBottom).
+          justifyContent: 'flex-end',
+        },
+        transcript,
+      ),
+      el(
+        Box,
+        { width: 1, flexShrink: 0, flexDirection: 'column' },
+        ...scrollbarRows(room, totalLines, clampedLines).map((on, i) =>
+          el(Text, { key: i, dimColor: !on, color: on ? ACCENT : undefined }, on ? '┃' : '│'),
+        ),
+      ),
     ),
     el(Box, { flexShrink: 0, flexDirection: 'column' }, el(TodoPanel, { todos })),
     ...(scrollHint ? [el(Box, { flexShrink: 0 }, scrollHint)] : []),
@@ -2553,6 +2566,30 @@ function markdownLineCount(text, width) {
  * Rendered-line estimate for one transcript item, matching ChatRow layout.
  * Overestimating slightly is fine (viewport clips the tail, never the head).
  */
+/**
+ * An item's height, kept: every render measured every item again, and with
+ * the wheel that is a render a notch. An item does not change once pushed
+ * (a change is a new object), so its height is kept by width and fold.
+ */
+const heightCache = new WeakMap();
+function itemHeight(item, width, thinkingOpen) {
+  if (item === null || typeof item !== 'object') {
+    return estimateItemLines(item, width, thinkingOpen);
+  }
+  const key = `${width}|${thinkingOpen ? 1 : 0}`;
+  let byKey = heightCache.get(item);
+  if (byKey === undefined) {
+    byKey = new Map();
+    heightCache.set(item, byKey);
+  }
+  let h = byKey.get(key);
+  if (h === undefined) {
+    h = estimateItemLines(item, width, thinkingOpen);
+    byKey.set(key, h);
+  }
+  return h;
+}
+
 export function estimateItemLines(item, width, thinkingOpen = true) {
   const avail = Math.max(1, width - 6);
   const text = item && typeof item.text === 'string' ? item.text : '';
@@ -2626,11 +2663,7 @@ export function computeViewport({
 }) {
   // thinkingOpen: one for all, or by item.
   const heights = items.map(item =>
-    estimateItemLines(
-      item,
-      width,
-      typeof thinkingOpen === 'function' ? thinkingOpen(item) : thinkingOpen,
-    ),
+    itemHeight(item, width, typeof thinkingOpen === 'function' ? thinkingOpen(item) : thinkingOpen),
   );
   const totalLines = heights.reduce((a, b) => a + b, 0);
   // Chrome rows: status row (busy) + scroll hint + composer + footer +
@@ -2645,20 +2678,24 @@ export function computeViewport({
   // room: the transcript's height as the App laid it out, exactly; the
   // estimate above is for a caller that did not.
   const height = room ?? Math.max(6, rows - chromeLines);
-  const maxScroll = Math.max(0, totalLines - 1);
-  const lines = Math.min(Math.max(0, scrollLines), maxScroll);
   // At the bottom, the answer streaming in is drawn under the items and
   // takes its share of the room; scrolled up, it is not drawn.
-  const available = lines === 0 ? Math.max(0, height - streamLines) : height;
+  const below = scrollLines > 0 ? 0 : streamLines;
+  // Scrolled no further than the first line at the top of the room.
+  const maxScroll = Math.max(0, totalLines - height);
+  const lines = Math.min(Math.max(0, scrollLines), maxScroll);
+  const available = Math.max(0, height - (lines === 0 ? below : 0));
 
+  // By lines, not by items: the window's bottom is `lines` up from the
+  // transcript's end, which may be inside an item — cutBottom is how much of
+  // that item is below the window, and the renderer moves it down by as
+  // much. Scrolled by items, a turn of the wheel inside a long answer moved
+  // nothing until it passed the answer, and then jumped.
   let visible = [];
-  // overflowTop: the topmost visible item is taller than the room left for
-  // it, and its end is what belongs in view — the transcript is then laid
-  // out from the bottom so the head is the part cut off.
+  let cutBottom = 0;
   let overflowTop = false;
   if (items.length > 0) {
-    // Window bottom = the item that contains the `lines`-th line from bottom.
-    let endIdx = items.length - 1;
+    let endIdx = 0;
     let consumed = 0;
     for (let i = items.length - 1; i >= 0; i--) {
       if (consumed + heights[i] > lines) {
@@ -2666,34 +2703,27 @@ export function computeViewport({
         break;
       }
       consumed += heights[i];
-      if (i === 0) {
-        endIdx = 0;
-      }
     }
-    // Fill upward from the window bottom until the viewport is full.
+    cutBottom = Math.max(0, lines - consumed);
+    // Up from the window's bottom until the room is full; the topmost item
+    // may be cut at its head, which the bottom-anchored layout cuts.
+    const need = available + cutBottom;
     let startIdx = endIdx;
     let total = 0;
     for (let i = endIdx; i >= 0; i--) {
-      if (total + heights[i] > available) {
-        // An item that cannot fit whole is still shown, its head cut off,
-        // when there is room left for any of it. Skipping it left only the
-        // short rows below it — a long answer followed by its status row
-        // drew a blank screen. Scrolled into the item itself (the window
-        // bottom above its last line), its head shows as before.
-        const scrolledInto = i === endIdx && lines > consumed;
-        if (total < available && !scrolledInto) {
-          startIdx = i;
-          overflowTop = true;
-        }
+      startIdx = i;
+      total += heights[i];
+      if (total >= need) {
+        overflowTop = total > need;
         break;
       }
-      total += heights[i];
-      startIdx = i;
     }
     visible = items.slice(startIdx, endIdx + 1);
   }
   return {
     visible,
+    cutBottom,
+    totalLines: totalLines + below,
     scrollLines: lines,
     maxScroll,
     atBottom: lines === 0,
@@ -2701,6 +2731,26 @@ export function computeViewport({
     overflowTop,
     step: Math.max(4, Math.floor(height / 2)),
   };
+}
+
+/**
+ * The scrollbar beside the transcript, one cell a row: which rows the thumb
+ * covers, from the content's height, the room's and how far up the window
+ * is. Empty when everything fits.
+ * @param {number} room
+ * @param {number} content
+ * @param {number} scrolledUp lines above the bottom
+ * @returns {boolean[]} per row, whether the thumb is there
+ */
+export function scrollbarRows(room, content, scrolledUp) {
+  if (content <= room || room <= 0) {
+    return [];
+  }
+  const thumb = Math.max(1, Math.round((room * room) / content));
+  const travel = room - thumb;
+  const fromTop = (content - room - Math.min(scrolledUp, content - room)) / (content - room);
+  const top = Math.round(fromTop * travel);
+  return Array.from({ length: room }, (_, i) => i >= top && i < top + thumb);
 }
 
 /**
