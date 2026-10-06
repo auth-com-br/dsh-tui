@@ -1,6 +1,13 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs, titleOf, listSessions, whenOf, searchTextOf } from '../src/sessions.js';
+import {
+  parseArgs,
+  titleOf,
+  listSessions,
+  whenOf,
+  searchTextOf,
+  resumeNote,
+} from '../src/sessions.js';
 
 /**
  * Resuming sessions: the TUI's command line, and the list it resumes from.
@@ -116,5 +123,14 @@ describe('parseArgs and dsh options', () => {
   test("dsh's own --patch and --profile, passed on, are not errors", () => {
     assert.deepEqual(parseArgs(['-c', '--patch', '/x/schedule.yml']), { resume: true });
     assert.deepEqual(parseArgs(['--patch=/x.yml', '--resume', 'abc']), { resume: 'abc' });
+  });
+});
+
+describe('resumeNote', () => {
+  test('a session with a message leaves its resume command; an empty one leaves nothing', () => {
+    const note = resumeNote('session-abc', [user('oi')]);
+    assert.match(note, /dsh --profile tui --resume session-abc/);
+    assert.match(note, /dsh --profile tui -c/);
+    assert.equal(resumeNote('session-abc', []), '');
   });
 });

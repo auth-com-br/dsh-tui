@@ -181,3 +181,23 @@ export function whenOf(createdAt, now) {
   }
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
+
+/**
+ * What is left on the terminal when the TUI quits: how to come back to the
+ * session, as Claude Code and Codex leave their resume command. The full
+ * form works with or without the shell's `dsh` shortcut; nothing is said
+ * for a session nobody wrote in, which -c would pass over anyway.
+ * @param {string} id
+ * @param {readonly {type: string, data?: any}[]} events
+ */
+export function resumeNote(id, events) {
+  if (userMessages(events) === 0) {
+    return '';
+  }
+  return [
+    '',
+    `  Resume this session:  dsh --profile tui --resume ${id}`,
+    '  or the latest here:   dsh --profile tui -c',
+    '',
+  ].join('\n');
+}

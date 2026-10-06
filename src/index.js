@@ -23,6 +23,7 @@ import {
   userMessages,
   searchTextOf,
   whenOf,
+  resumeNote,
 } from './sessions.js';
 import { refRows } from './refs.js';
 import { agentRows } from './agents.js';
@@ -260,6 +261,15 @@ async function run(ctx, exit) {
       } catch {
         // The App already unmounted itself via useApp().exit().
       }
+    }
+    // How to come back, under the last frame.
+    try {
+      const note = resumeNote(current.agent.session.id, current.agent.session.snapshotEvents());
+      if (note !== '') {
+        process.stdout.write(`${note}\n`);
+      }
+    } catch {
+      // A session that cannot be read has nothing to say.
     }
     // The launcher's graceful path only sets process.exitCode and relies on
     // the event loop draining; file watchers can keep it alive after the UI
