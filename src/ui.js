@@ -536,14 +536,19 @@ function ChatRow({ item, width, thinkingOpen, themeBg }) {
     }
     case 'assistant': {
       const lines = [];
-      if (item.reasoning !== '' && thinkingOpen) {
+      if (item.reasoning !== '') {
+        const view = thinkingView(item.reasoning, width, thinkingOpen);
         lines.push(
           el(
             Box,
             { key: 'thinking', flexDirection: 'column' },
-            el(Text, { dimColor: true, bold: true }, '  thinking'),
-            ...wrapText(item.reasoning, Math.max(1, width - 6)).map((line, i) =>
-              el(Text, { key: `t${i}`, dimColor: true, italic: true, wrap: 'wrap' }, `    ${line}`),
+            el(Text, { dimColor: true }, view.heading),
+            ...view.lines.map((line, i) =>
+              el(
+                Text,
+                { key: `t${i}`, dimColor: true, italic: true, wrap: 'truncate' },
+                `    ${line}`,
+              ),
             ),
           ),
         );
@@ -647,17 +652,42 @@ function ChatRow({ item, width, thinkingOpen, themeBg }) {
   }
 }
 
+// ── Thinking ─────────────────────────────────────────────────────────────
+
+/** How many of the latest thinking lines show while it streams, folded. */
+const THINKING_TAIL = 3;
+
+/**
+ * A thought, folded or open. Folded it is one line saying how long it is —
+ * the answer is what a person reads, and a local model thinks at length;
+ * open (ctrl+t) it is every line. While it streams, folded, its latest
+ * lines show under the heading, so it is seen to be moving.
+ * @returns {{heading: string, lines: string[]}}
+ */
+export function thinkingView(reasoning, width, open, streaming = false) {
+  const all = wrapText(String(reasoning), Math.max(1, width - 6));
+  const n = all.length;
+  if (open) {
+    return { heading: `  ▾ thinking · ${n} line${n === 1 ? '' : 's'} · ctrl+t folds`, lines: all };
+  }
+  if (streaming) {
+    return { heading: '  ▸ thinking… · ctrl+t shows all', lines: all.slice(-THINKING_TAIL) };
+  }
+  return { heading: `  ▸ thinking · ${n} line${n === 1 ? '' : 's'} · ctrl+t shows`, lines: [] };
+}
+
 /** Live streaming block while a turn is in flight. */
 function StreamBlock({ stream, width, thinkingOpen, themeBg }) {
   const children = [];
-  if (stream.reasoning !== '' && thinkingOpen) {
+  if (stream.reasoning !== '') {
+    const view = thinkingView(stream.reasoning, width, thinkingOpen, true);
     children.push(
       el(
         Box,
         { key: 'reasoning', flexDirection: 'column', marginTop: 1 },
-        el(Text, { dimColor: true, bold: true }, '  thinking'),
-        ...wrapText(stream.reasoning, Math.max(1, width - 6)).map((line, i) =>
-          el(Text, { key: `t${i}`, dimColor: true, italic: true, wrap: 'wrap' }, `    ${line}`),
+        el(Text, { dimColor: true }, view.heading),
+        ...view.lines.map((line, i) =>
+          el(Text, { key: `t${i}`, dimColor: true, italic: true, wrap: 'truncate' }, `    ${line}`),
         ),
       ),
     );
@@ -826,7 +856,9 @@ export function App({
   const [busy, setBusy] = useState(false);
   const [stream, setStream] = useState({ reasoning: '', text: '', tool: null });
   const [hint, setHint] = useState(null);
-  const [thinkingOpen, setThinkingOpen] = useState(true);
+  // Thinking is folded by default: a local model thinks at length, and the
+  // answer under its thought was pushed off the screen by it.
+  const [thinkingOpen, setThinkingOpen] = useState(false);
   const [scrollLines, setScrollLines] = useState(0);
   // Approval requests waiting for the user, oldest first: the first is the
   // one shown. Each carries the resolve of the harness's waiting request.
@@ -2115,7 +2147,10 @@ export function App({
 
   const transcript = el(
     Box,
-    { flexDirection: 'column', paddingLeft: 1, paddingRight: 1 },
+    // flexShrink 0: shrunk to the room, it let its content run out below
+    // it, so laying the room out from its bottom showed the head of the
+    // last answer — the thinking — and not its end, the answer itself.
+    { flexDirection: 'column', paddingLeft: 1, paddingRight: 1, flexShrink: 0 },
     el(
       ErrorBoundary,
       { resetKey: items.length },
@@ -2352,8 +2387,8 @@ export function estimateItemLines(item, width, thinkingOpen = true) {
     }
     case 'assistant': {
       let n = 1; // marginTop
-      if (thinkingOpen && item.reasoning !== undefined && item.reasoning !== '') {
-        n += 1 + wrapText(String(item.reasoning), avail).length;
+      if (item.reasoning !== undefined && item.reasoning !== '') {
+        n += 1 + thinkingView(item.reasoning, width, thinkingOpen).lines.length;
       }
       if (text !== '') {
         n += markdownLineCount(text, width);
@@ -2486,8 +2521,8 @@ export function computeViewport({
  */
 export function estimateStreamLines(stream, width, thinkingOpen = true) {
   let n = 0;
-  if (stream.reasoning !== '' && thinkingOpen) {
-    n += 2 + wrapText(stream.reasoning, Math.max(1, width - 6)).length;
+  if (stream.reasoning !== '') {
+    n += 2 + thinkingView(stream.reasoning, width, thinkingOpen, true).lines.length;
   }
   if (stream.text !== '') {
     n += 1 + markdownLineCount(stream.text, width);
