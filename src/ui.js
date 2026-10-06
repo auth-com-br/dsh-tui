@@ -2009,6 +2009,17 @@ export function App({
 
   // ── Viewport: keep the transcript tail visible (bottom-anchored), with
   // line-based scrolling on top (scrollLines = lines offset from the bottom).
+  // The bottom of the screen, fixed: what is shown over the composer
+  // (todos, plan and goal, attachments, the scroll hint), the rule that
+  // carries the status, the composer — or a menu, an approval, a question
+  // in or over its place — and the footer. The transcript gets exactly the
+  // rest: let it grow and the layout squeezed the composer and the footer
+  // off the screen while an answer streamed in.
+  const todoLines = todos.length > 0 ? 2 + todos.length : 0;
+  const inputLines =
+    viewer !== undefined && approvals.length === 0 && asks.length === 0 ? 1 : composerExtra + 1;
+  const chrome = todoLines + standingShown.length + (scrollLines > 0 ? 1 : 0) + 1 + inputLines + 1;
+  const room = Math.max(3, rows - chrome);
   const viewport = computeViewport({
     items,
     rows,
@@ -2018,6 +2029,8 @@ export function App({
     todos,
     thinkingOpen,
     composerExtra: composerExtra + standingShown.length,
+    room,
+    streamLines: estimateStreamLines(stream, width, thinkingOpen),
   });
   const { visible, scrollLines: clampedLines, atBottom, step, overflowTop } = viewport;
   useEffect(() => {
@@ -2106,7 +2119,6 @@ export function App({
     el(
       ErrorBoundary,
       { resetKey: items.length },
-      el(TodoPanel, { todos }),
       welcome,
       ...visible.map((item, index) =>
         el(ChatRow, { key: index, item, width, thinkingOpen, themeBg }),
@@ -2118,33 +2130,47 @@ export function App({
   );
 
   const idleSeconds = busy ? Math.floor((Date.now() - lastEventAt.current) / 1000) : 0;
-  const statusRow = busy
-    ? el(
-        Box,
-        { paddingLeft: 1, paddingRight: 1, flexDirection: 'row' },
-        el(BrailleSpinner),
-        el(Text, { bold: true, color: ACCENT }, ' Working'),
-        el(
-          Text,
-          { dimColor: true },
-          ` ${turnStart.current !== undefined ? fmtElapsedCompact(Date.now() - turnStart.current) : ''}`,
-        ),
-        ...(liveRate(speed.current, Date.now()) !== undefined
-          ? [el(Text, { dimColor: true }, ` · ~${fmtRate(liveRate(speed.current, Date.now()))}`)]
-          : []),
-        ...(idleSeconds >= 15
-          ? [
-              el(
-                Text,
-                { dimColor: true, color: idleSeconds >= 60 ? ERR : undefined },
-                ` · model thinking ${idleSeconds}s`,
-              ),
-            ]
-          : []),
-        el(Box, { flexGrow: 1 }),
-        el(Text, { dimColor: true }, viewer !== undefined ? 'esc back' : 'esc interrupt'),
-      )
-    : null;
+  // The rule over the composer, carrying the status: a line whatever
+  // happens, so the composer does not move when a turn starts or ends.
+  const live = busy ? liveRate(speed.current, Date.now()) : undefined;
+  // One line of text, its dashes counted: a box of dashes as wide as the
+  // terminal, shrunk to fit, was measured at its full width and drew over
+  // the status beside it.
+  const elapsed =
+    busy && turnStart.current !== undefined
+      ? fmtElapsedCompact(Date.now() - turnStart.current)
+      : '';
+  const statusParts = busy
+    ? [
+        ` ${elapsed}`,
+        live !== undefined ? ` · ~${fmtRate(live)}` : '',
+        idleSeconds >= 15 ? ` · model thinking ${idleSeconds}s` : '',
+        ' ',
+      ].join('')
+    : '';
+  const ruleRight = busy ? (viewer !== undefined ? ' esc back ─' : ' esc interrupt ─') : ' /help ─';
+  const ruleLeft = busy ? '─ ⠋ Working' : '─';
+  const fill = Math.max(
+    1,
+    cols - 2 - strWidth(ruleLeft) - strWidth(statusParts) - strWidth(ruleRight),
+  );
+  const statusRule = el(
+    Box,
+    { paddingLeft: 1, paddingRight: 1, flexShrink: 0, height: 1 },
+    el(
+      Text,
+      { wrap: 'truncate' },
+      el(Text, { dimColor: true }, busy ? '─ ' : '─'),
+      ...(busy
+        ? [
+            el(BrailleSpinner),
+            el(Text, { bold: true, color: ACCENT }, ' Working'),
+            el(Text, { dimColor: true, color: idleSeconds >= 60 ? ERR : undefined }, statusParts),
+          ]
+        : []),
+      el(Text, { dimColor: true }, '─'.repeat(fill) + ruleRight),
+    ),
+  );
 
   const scrollHint = !atBottom
     ? el(
@@ -2263,22 +2289,24 @@ export function App({
     el(
       Box,
       {
-        flexGrow: 1,
+        height: room,
+        flexShrink: 0,
         flexDirection: 'column',
         overflow: 'hidden',
-        // Laid out from the bottom while the top item overflows, so the
-        // rendered height — not the estimate — decides what is cut, and it
-        // is the head of the long message rather than its end.
-        justifyContent: overflowTop ? 'flex-end' : 'flex-start',
+        // Laid out from the bottom at the latest, and while the top item
+        // overflows, so the rendered height — not the estimate — decides
+        // what is cut, and it is the head of what is too tall rather than
+        // the end of the answer streaming in.
+        justifyContent: atBottom || overflowTop ? 'flex-end' : 'flex-start',
       },
       transcript,
     ),
-    statusRow,
-    scrollHint,
+    el(Box, { flexShrink: 0, flexDirection: 'column' }, el(TodoPanel, { todos })),
+    ...(scrollHint ? [el(Box, { flexShrink: 0 }, scrollHint)] : []),
     ...standingShown.map((line, i) =>
       el(
         Box,
-        { key: `standing${i}`, paddingLeft: 1, paddingRight: 1 },
+        { key: `standing${i}`, paddingLeft: 1, paddingRight: 1, flexShrink: 0 },
         el(
           Text,
           line.style === 'plan'
@@ -2290,8 +2318,9 @@ export function App({
         ),
       ),
     ),
-    inputRow,
-    hintRow,
+    statusRule,
+    el(Box, { flexShrink: 0, flexDirection: 'column' }, inputRow),
+    el(Box, { flexShrink: 0, height: 1 }, hintRow),
   );
 }
 
@@ -2374,6 +2403,8 @@ export function computeViewport({
   todos = [],
   thinkingOpen = true,
   composerExtra = 0,
+  room,
+  streamLines = 0,
 }) {
   const heights = items.map(item => estimateItemLines(item, width, thinkingOpen));
   const totalLines = heights.reduce((a, b) => a + b, 0);
@@ -2386,9 +2417,14 @@ export function computeViewport({
     2 +
     (items.length === 0 ? 1 : 0) +
     (todos.length > 0 ? 2 + todos.length : 0);
-  const available = Math.max(6, rows - chromeLines);
+  // room: the transcript's height as the App laid it out, exactly; the
+  // estimate above is for a caller that did not.
+  const height = room ?? Math.max(6, rows - chromeLines);
   const maxScroll = Math.max(0, totalLines - 1);
   const lines = Math.min(Math.max(0, scrollLines), maxScroll);
+  // At the bottom, the answer streaming in is drawn under the items and
+  // takes its share of the room; scrolled up, it is not drawn.
+  const available = lines === 0 ? Math.max(0, height - streamLines) : height;
 
   let visible = [];
   // overflowTop: the topmost visible item is taller than the room left for
@@ -2438,8 +2474,28 @@ export function computeViewport({
     atBottom: lines === 0,
     atTop: lines >= maxScroll,
     overflowTop,
-    step: Math.max(4, Math.floor(available / 2)),
+    step: Math.max(4, Math.floor(height / 2)),
   };
+}
+
+/**
+ * Rendered-line estimate of the answer streaming in, matching StreamBlock.
+ * @param {{reasoning: string, text: string, tool: object | null}} stream
+ * @param {number} width
+ * @param {boolean} thinkingOpen
+ */
+export function estimateStreamLines(stream, width, thinkingOpen = true) {
+  let n = 0;
+  if (stream.reasoning !== '' && thinkingOpen) {
+    n += 2 + wrapText(stream.reasoning, Math.max(1, width - 6)).length;
+  }
+  if (stream.text !== '') {
+    n += 1 + markdownLineCount(stream.text, width);
+  }
+  if (stream.tool !== null) {
+    n += 1;
+  }
+  return n;
 }
 
 // Pure helpers, exported for tests (no Ink dependencies beyond React elements).
