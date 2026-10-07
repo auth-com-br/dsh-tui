@@ -14,7 +14,7 @@
  */
 
 import React, { useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { Text, useInput } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import { clusters } from './utils.js';
 
 /** How long the cursor is shown, then hidden, while nothing is typed. */
@@ -41,6 +41,10 @@ export function editKey(line, input, key) {
   // A line feed alone is Enter too: a program the agent started can turn
   // the terminal's icrnl on, and then Enter arrives as \n — Ink's "enter",
   // not its "return" — and nothing could be sent.
+  // Alt+Enter is a new line in the message; Enter sends it.
+  if (key.return && key.meta) {
+    return make([...p.slice(0, at), '\n', ...p.slice(at)], at + 1);
+  }
   if (key.return || input === '\n') {
     return { line, submit: line.text };
   }
@@ -87,9 +91,10 @@ export function editKey(line, input, key) {
   if (key.ctrl || key.meta || input === '') {
     return { line };
   }
-  // A paste arrives as one input; its line breaks become spaces, since
-  // enter sends.
-  const typed = parts(input.replace(/\r\n?|\n/g, ' '));
+  // A paste arrives as one input, its line breaks as \r (or \n): they are
+  // kept, so pasted code or a log stays as it was — they used to become
+  // spaces, since Enter sends.
+  const typed = parts(input.replace(/\r\n?/g, '\n'));
   return make([...p.slice(0, at), ...typed, ...p.slice(at)], at + typed.length);
 }
 
@@ -106,15 +111,88 @@ export function splitAtCursor(line) {
 
 const el = React.createElement;
 
+/** The composer grows to this many lines, then shows the cursor's part. */
+export const MAX_COMPOSER_LINES = 8;
+
+/**
+ * The line laid out in `width` columns: wrapped at the width and at its own
+ * line breaks, each row its text with the cursor's cell apart, and the row
+ * the cursor is on. At most MAX_COMPOSER_LINES rows are kept, the cursor's
+ * among them.
+ * @param {Line} line
+ * @param {number} width
+ * @returns {{rows: Array<{before: string, under?: string, after: string}>, cursorRow: number, total: number}}
+ */
+export function layoutComposer(line, width) {
+  const w = Math.max(4, width);
+  const cs = clusters(line.text);
+  const at = Math.min(line.cursor, cs.length);
+  const rows = [];
+  let row = { text: [], width: 0, cursor: -1 };
+  let cursorRow = 0;
+  const flush = () => {
+    rows.push(row);
+    row = { text: [], width: 0, cursor: -1 };
+  };
+  for (let i = 0; i <= cs.length; i++) {
+    const c = i < cs.length ? cs[i] : { s: ' ', w: 1 };
+    if (c.s === '\n') {
+      if (i === at) {
+        row.cursor = row.text.length;
+        row.text.push(' ');
+        cursorRow = rows.length;
+      }
+      flush();
+      continue;
+    }
+    if (row.width + c.w > w) {
+      flush();
+    }
+    if (i === at) {
+      row.cursor = row.text.length;
+      cursorRow = rows.length;
+    }
+    if (i < cs.length || i === at) {
+      row.text.push(c.s);
+      row.width += c.w;
+    }
+  }
+  flush();
+  const out = rows.map(r =>
+    r.cursor < 0
+      ? { before: r.text.join(''), after: '' }
+      : {
+          before: r.text.slice(0, r.cursor).join(''),
+          under: r.text[r.cursor],
+          after: r.text.slice(r.cursor + 1).join(''),
+        },
+  );
+  const total = out.length;
+  if (total <= MAX_COMPOSER_LINES) {
+    return { rows: out, cursorRow, total };
+  }
+  const start = Math.min(
+    Math.max(0, cursorRow - MAX_COMPOSER_LINES + 1),
+    total - MAX_COMPOSER_LINES,
+  );
+  return {
+    rows: out.slice(start, start + MAX_COMPOSER_LINES),
+    cursorRow: cursorRow - start,
+    total,
+  };
+}
+
 /**
  * The composer. The App sets its text through `ref.current.set(text)` and
  * hears of changes through `onChange`, which it keeps cheap.
  * `initial` is the text it opens with: what was typed before an approval or
  * a question took its place.
- * @param {{onChange: (text: string) => void, onSubmit: (text: string) => void, placeholder?: string, initial?: string}} props
+ * `width` is its columns, and onHeight hears how many lines it takes when
+ * that changes — rarely, so the App is not re-rendered by typing.
+ * @param {{onChange: (text: string) => void, onSubmit: (text: string) => void, placeholder?: string, initial?: string, width?: number, onHeight?: (lines: number) => void}} props
  */
 export const Composer = React.forwardRef(function Composer(
-  { onChange, onSubmit, placeholder = '', initial = '' },
+  { onChange, onSubmit, placeholder = '', initial = '', width = 80, onHeight },
   ref,
 ) {
   const [line, setLine] = useState(() => ({ text: initial, cursor: parts(initial).length }));
@@ -162,6 +240,12 @@ export const Composer = React.forwardRef(function Composer(
     return () => clearInterval(timer);
   }, []);
 
+  const laid = layoutComposer(line, width);
+  const height = laid.rows.length;
+  useEffect(() => {
+    onHeight?.(height);
+  }, [height, onHeight]);
+
   if (line.text === '' && placeholder !== '') {
     return el(
       Text,
@@ -170,6 +254,17 @@ export const Composer = React.forwardRef(function Composer(
       el(Text, { dimColor: true }, placeholder.slice(1)),
     );
   }
-  const { before, under, after } = splitAtCursor(line);
-  return el(Text, null, before, el(Text, { inverse: shown }, under), after);
+  return el(
+    Box,
+    { flexDirection: 'column' },
+    ...laid.rows.map((r, i) =>
+      el(
+        Text,
+        { key: i, wrap: 'truncate' },
+        r.before,
+        r.under !== undefined ? el(Text, { inverse: shown }, r.under) : null,
+        r.after,
+      ),
+    ),
+  );
 });

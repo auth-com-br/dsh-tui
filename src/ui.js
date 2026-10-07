@@ -865,6 +865,8 @@ export function App({
   const [input, setMirror] = useState('');
   const composerText = useRef('');
   const composerApi = useRef(null);
+  // The composer's height in lines, which it says when it changes.
+  const [composerHeight, setComposerHeight] = useState(1);
   const onComposerChange = useCallback(text => {
     composerText.current = text;
     setMirror(text.startsWith('/') || activeAtToken(text) !== undefined ? text : '');
@@ -1136,6 +1138,19 @@ export function App({
     }
     setInput(replaceToken(line, token, drill && row.drill ? row.drill : row.settle));
   };
+  // What Enter in the composer reads: the menu and its cursor as they are
+  // now. The composer held an onSubmit from an older render — one from
+  // before the `/` was typed, menu empty — so Enter sent "/" as a command
+  // instead of picking the row the arrows had marked.
+  const menuNow = useRef({ menu: [], cursor: 0, pick: () => {}, submit: () => {} });
+  const onComposerSubmit = useCallback(value => {
+    const now = menuNow.current;
+    if (now.menu.length > 0) {
+      now.pick(now.menu[now.cursor]);
+    } else {
+      now.submit(value);
+    }
+  }, []);
   const pickFromMenu = row => {
     if (row.settle !== undefined) {
       pickRef(row, false);
@@ -1204,7 +1219,14 @@ export function App({
       }
     }
     if (key.ctrl && input === 'c') {
-      handleExit();
+      // With something typed, the first ctrl+c clears it, as shells do: one
+      // pressed to drop a line used to quit and lose it.
+      if (composerText.current !== '') {
+        setInput('');
+        flashHint('ctrl+c again quits');
+      } else {
+        handleExit();
+      }
     } else if (key.escape && busy && typeof onInterrupt === 'function') {
       onInterrupt();
     } else if (key.escape) {
@@ -2145,6 +2167,7 @@ export function App({
     ],
   );
   handleSubmitRef.current = handleSubmit;
+  menuNow.current = { menu, cursor, pick: pickFromMenu, submit: handleSubmit };
 
   // The lines in the composer's place beyond its own: the `/` menu above
   // it, or an approval or a question shown instead of it.
@@ -2177,7 +2200,9 @@ export function App({
   // off the screen while an answer streamed in.
   const todoLines = todos.length > 0 ? 2 + todos.length : 0;
   const inputLines =
-    viewer !== undefined && approvals.length === 0 && asks.length === 0 ? 1 : composerExtra + 1;
+    viewer !== undefined && approvals.length === 0 && asks.length === 0
+      ? 1
+      : composerExtra + composerHeight;
   const chrome = todoLines + standingShown.length + (scrollLines > 0 ? 1 : 0) + 1 + inputLines + 1;
   const room = Math.max(3, rows - chrome);
   const viewport = computeViewport({
@@ -2410,8 +2435,10 @@ export function App({
                   // enter on an open menu picks its row: a bare command runs,
                   // one taking an argument or a skill is completed to be
                   // finished.
-                  onSubmit: value =>
-                    menu.length > 0 ? pickFromMenu(menu[cursor]) : handleSubmit(value),
+                  onSubmit: onComposerSubmit,
+                  // Its columns: the prompt's two and the paddings are not.
+                  width: Math.max(10, cols - 4),
+                  onHeight: setComposerHeight,
                   placeholder: 'Ask anything',
                 }),
               ),

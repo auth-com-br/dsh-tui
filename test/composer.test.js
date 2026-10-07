@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { editKey, splitAtCursor } from '../src/composer.js';
+import { editKey, splitAtCursor, layoutComposer, MAX_COMPOSER_LINES } from '../src/composer.js';
 
 /**
  * The composer. If these regress, keys typed fast are lost again, the
@@ -48,9 +48,12 @@ test('an emoji is one step: one backspace removes it whole', () => {
   assert.equal(type(l, { backspace: true }).text, 'ok ');
 });
 
-test('enter submits the text; a paste with line breaks stays one line', () => {
+test('enter submits the text; a paste keeps its line breaks; alt+enter adds one', () => {
   assert.equal(editKey({ text: 'hi', cursor: 2 }, '', { return: true }).submit, 'hi');
-  assert.equal(type(empty, 'a\nb\r\nc').text, 'a b c');
+  assert.equal(type(empty, 'a\rb\r\nc').text, 'a\nb\nc');
+  const l = editKey({ text: 'ab', cursor: 1 }, '\r', { return: true, meta: true });
+  assert.equal(l.submit, undefined);
+  assert.deepEqual(l.line, { text: 'a\nb', cursor: 2 });
 });
 
 test('keys that are the App’s change nothing', () => {
@@ -76,4 +79,25 @@ test('the character under the cursor is drawn apart, a space at the end', () => 
 
 test('Enter arriving as a line feed (icrnl turned on by a child) still sends', () => {
   assert.equal(editKey({ text: 'hi', cursor: 2 }, '\n', {}).submit, 'hi');
+});
+
+test('the composer wraps at its width and at its line breaks, the cursor in its row', () => {
+  const laid = layoutComposer({ text: 'abcdef\nxy', cursor: 9 }, 4);
+  assert.deepEqual(
+    laid.rows.map(r => r.before + (r.under ?? '') + r.after),
+    ['abcd', 'ef', 'xy '],
+  );
+  assert.equal(laid.cursorRow, 2);
+  assert.equal(laid.rows[2].under, ' ');
+});
+
+test('a tall message shows the cursor’s part, no taller than the most lines', () => {
+  const text = Array.from({ length: 20 }, (_, i) => `l${i}`).join('\n');
+  const atEnd = layoutComposer({ text, cursor: [...text].length }, 40);
+  assert.equal(atEnd.rows.length, MAX_COMPOSER_LINES);
+  assert.equal(atEnd.total, 20);
+  assert.match(atEnd.rows.at(-1).before, /l19/);
+  const atStart = layoutComposer({ text, cursor: 0 }, 40);
+  assert.equal(atStart.cursorRow, 0);
+  assert.equal(atStart.rows[0].under, 'l');
 });
