@@ -101,3 +101,22 @@ test('a tall message shows the cursor’s part, no taller than the most lines', 
   assert.equal(atStart.cursorRow, 0);
   assert.equal(atStart.rows[0].under, 'l');
 });
+
+test('↑ and ↓ move between the rows of a long message, and stop at its edges', async () => {
+  const { moveRow } = await import('../src/composer.js');
+  const line = { text: 'abcdef\nxy', cursor: 8 }; // on "y"
+  assert.equal(moveRow(line, 4, -1), 5, 'up to the same column of "ef"');
+  assert.equal(
+    moveRow({ text: 'abcdef\nxy', cursor: 1 }, 4, -1),
+    undefined,
+    'the first row: history',
+  );
+  assert.equal(moveRow({ text: 'abcdef\nxy', cursor: 1 }, 4, 1), 5, 'down from "b" to "f"');
+  assert.equal(moveRow(line, 4, 1), undefined, 'the last row: history');
+});
+
+test('a mouse report is not typed into the composer', () => {
+  const l = { text: 'hi', cursor: 2 };
+  assert.equal(editKey(l, '\x1b[<64;10;5M', {}).line, l);
+  assert.equal(editKey(l, '[<0;10;5M[<0;10;5m', {}).line, l, 'as Ink hands it over');
+});

@@ -41,7 +41,7 @@ export TOKENDANCE_API_KEY=sk-...   # or add it to ~/.dsh/.credentials.yaml (0600
 dsh --profile tui                  # open the TUI
 ```
 
-In the TUI: `ctrl + t` folds the thinking trace, `esc` interrupts the running turn, `/help` shows all keys and commands.
+In the TUI: the wheel scrolls, `↑`/`↓` recall earlier messages, a click (or `ctrl + t`) opens or folds a thought, `esc` interrupts the running turn, `/help` shows all keys and commands. The TUI takes the mouse, so text is selected with `shift + drag` (`alt + drag` inside tend).
 
 ## What it does
 

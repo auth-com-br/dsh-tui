@@ -15,6 +15,7 @@
 
 import React, { useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
+import { isMouse } from './mouse.js';
 import { clusters } from './utils.js';
 
 /** How long the cursor is shown, then hidden, while nothing is typed. */
@@ -88,7 +89,9 @@ export function editKey(line, input, key) {
     }
     return make([...p.slice(0, at - 1), ...p.slice(at)], at - 1);
   }
-  if (key.ctrl || key.meta || input === '') {
+  // An escape sequence Ink did not name — a mouse report above all, now
+  // that the TUI takes the mouse — is not text to type.
+  if (key.ctrl || key.meta || input === '' || input.startsWith('\x1b') || isMouse(input)) {
     return { line };
   }
   // A paste arrives as one input, its line breaks as \r (or \n): they are
@@ -113,6 +116,61 @@ const el = React.createElement;
 
 /** The composer grows to this many lines, then shows the cursor's part. */
 export const MAX_COMPOSER_LINES = 8;
+
+/**
+ * The cursor one row up or down in the laid-out line, at the same column
+ * or the row's end; undefined at the first or last row, where ↑/↓ go to the
+ * message history instead.
+ * @param {Line} line
+ * @param {number} width
+ * @param {-1 | 1} dir
+ * @returns {number | undefined} the new cursor
+ */
+export function moveRow(line, width, dir) {
+  const w = Math.max(4, width);
+  const cs = clusters(line.text);
+  // Each row's first cluster index and its clusters' widths.
+  const rows = [{ start: 0, widths: [] }];
+  let rowW = 0;
+  for (let i = 0; i < cs.length; i++) {
+    const c = cs[i];
+    if (c.s === '\n') {
+      rows.at(-1).widths.push(0);
+      rows.push({ start: i + 1, widths: [] });
+      rowW = 0;
+      continue;
+    }
+    if (rowW + c.w > w) {
+      rows.push({ start: i, widths: [] });
+      rowW = 0;
+    }
+    rows.at(-1).widths.push(c.w);
+    rowW += c.w;
+  }
+  const at = Math.min(line.cursor, cs.length);
+  let r = rows.length - 1;
+  while (r > 0 && rows[r].start > at) {
+    r--;
+  }
+  const target = r + dir;
+  if (target < 0 || target >= rows.length) {
+    return undefined;
+  }
+  let col = 0;
+  for (let i = rows[r].start; i < at; i++) {
+    col += cs[i].w;
+  }
+  const t = rows[target];
+  let i = 0;
+  let c = 0;
+  // Stop before a line break, which ends the row and is not on it.
+  const last = target < rows.length - 1 ? t.widths.length - 1 : t.widths.length;
+  while (i < last && c + t.widths[i] <= col) {
+    c += t.widths[i];
+    i++;
+  }
+  return t.start + i;
+}
 
 /**
  * The line laid out in `width` columns: wrapped at the width and at its own
@@ -189,10 +247,21 @@ export function layoutComposer(line, width) {
  * a question took its place.
  * `width` is its columns, and onHeight hears how many lines it takes when
  * that changes — rarely, so the App is not re-rendered by typing.
- * @param {{onChange: (text: string) => void, onSubmit: (text: string) => void, placeholder?: string, initial?: string, width?: number, onHeight?: (lines: number) => void}} props
+ * `history` gives the messages sent, oldest first, and `arrowsTaken` says
+ * when ↑/↓ are someone else's (the `/` menu's).
+ * @param {{onChange: (text: string) => void, onSubmit: (text: string) => void, placeholder?: string, initial?: string, width?: number, onHeight?: (lines: number) => void, history?: () => readonly string[], arrowsTaken?: () => boolean}} props
  */
 export const Composer = React.forwardRef(function Composer(
-  { onChange, onSubmit, placeholder = '', initial = '', width = 80, onHeight },
+  {
+    onChange,
+    onSubmit,
+    placeholder = '',
+    initial = '',
+    width = 80,
+    onHeight,
+    history,
+    arrowsTaken,
+  },
   ref,
 ) {
   const [line, setLine] = useState(() => ({ text: initial, cursor: parts(initial).length }));
@@ -220,14 +289,49 @@ export const Composer = React.forwardRef(function Composer(
     [onChange],
   );
 
+  // Where ↑ has gone in the history (-1: not in it), and the draft it left.
+  const hist = useRef({ index: -1, draft: '' });
+
   useInput((input, key) => {
+    if ((key.upArrow || key.downArrow) && !arrowsTaken?.()) {
+      const dir = key.upArrow ? -1 : 1;
+      const moved = moveRow(current.current, width, dir);
+      if (moved !== undefined) {
+        commit({ ...current.current, cursor: moved });
+      } else {
+        // ↑ on the first row: the message before; ↓ on the last: the one
+        // after, and past the newest, the draft that was being written.
+        const all = history?.() ?? [];
+        const h = hist.current;
+        const next = h.index + (dir === -1 ? 1 : -1);
+        if (next >= 0 && next < all.length) {
+          if (h.index === -1) {
+            h.draft = current.current.text;
+          }
+          h.index = next;
+          const text = all[all.length - 1 - next];
+          commit({ text, cursor: parts(text).length });
+        } else if (next === -1 && h.index !== -1) {
+          h.index = -1;
+          commit({ text: h.draft, cursor: parts(h.draft).length });
+        }
+      }
+      lastKey.current = Date.now();
+      setShown(true);
+      return;
+    }
     const { line: next, submit } = editKey(current.current, input, key);
+    if (next !== current.current && next.text !== current.current.text) {
+      // An edit leaves the history where it is: the line is the person's.
+      hist.current.index = -1;
+    }
     if (next !== current.current) {
       commit(next);
     }
     lastKey.current = Date.now();
     setShown(true);
     if (submit !== undefined) {
+      hist.current = { index: -1, draft: '' };
       onSubmit(submit);
     }
   });

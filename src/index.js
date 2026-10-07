@@ -48,7 +48,7 @@ export const inject = ['agentDefaultModel', 'agents', 'sessions', 'sessionPersis
  */
 let uiHandler = undefined;
 
-const ENTER_SCREEN = '\x1b[?1049h\x1b[?1007h\x1b[2J\x1b[H';
+const ENTER_SCREEN = '\x1b[?1049h\x1b[?1000h\x1b[?1006h\x1b[2J\x1b[H';
 let screenLeft = false;
 /** The main screen again, once, however the TUI ends. */
 function leaveScreen() {
@@ -57,7 +57,7 @@ function leaveScreen() {
   }
   screenLeft = true;
   try {
-    process.stdout.write('\x1b[?1007l\x1b[?1049l');
+    process.stdout.write('\x1b[?1006l\x1b[?1000l\x1b[?1049l');
   } catch {
     // The terminal has gone.
   }
@@ -774,10 +774,11 @@ async function run(ctx, exit) {
   // and a stdio MCP server's banner ("… running on stdio": its stderr is
   // inherited, with no setting in dsh-mcp-client) were left above it.
   //
-  // With it, 1007: the terminal sends the wheel as the arrow keys, which
-  // scroll the transcript — the TUI redraws in place, so its past is not in
-  // the terminal's scrollback for the wheel to find — without taking the
-  // mouse, so selecting text still works.
+  // With it, the mouse (1000, reported as SGR, 1006): the wheel scrolls the
+  // transcript — the TUI redraws in place, so its past is not in the
+  // terminal's scrollback — and a click opens a thought. The wheel used to
+  // come as arrow keys (1007), which left ↑ unable to recall a message.
+  // Selecting text is shift+drag now, as in any program that has the mouse.
   if (process.stdout.isTTY) {
     // Whatever was written on it while the harness loaded.
     process.stdout.write('\x1b[2J\x1b[H');

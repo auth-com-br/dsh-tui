@@ -21,6 +21,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
+import { parseMouse } from './mouse.js';
 import { Composer } from './composer.js';
 import { newQuestions, questionKey, questionLines, answersOf } from './questions.js';
 import { whenOf } from './sessions.js';
@@ -69,7 +70,7 @@ function BrailleSpinner() {
 }
 
 /** How far ↑/↓ — and a notch of the wheel, sent as them — scroll. */
-const ARROW_LINES = 3;
+const WHEEL_LINES = 3;
 
 /** Caps. */
 const MAX_ITEMS = 500;
@@ -200,8 +201,11 @@ const HELP_TEXT = [
   '  @path         refer to a file or folder; @ also lists other sessions',
   '  /exit, /quit  quit dsh tui',
   'keys:',
-  '  ↑ / ↓          scroll transcript',
+  '  wheel          scroll transcript',
+  '  ↑ / ↓          the message history (rows, in a long message)',
   '  page up/down   scroll by page',
+  '  click          open or fold a thought',
+  '  shift + drag   select text (alt + drag inside tend)',
   '  esc            back to latest',
   '  ctrl + t       toggle thinking display',
   '  ctrl + c       quit',
@@ -892,8 +896,24 @@ export function App({
     item => allThoughts || openThoughts.has(item?.id),
     [allThoughts, openThoughts],
   );
+  const toggleThought = useCallback(item => {
+    setAllThoughts(false);
+    setOpenThoughts(prev => {
+      const next = new Set(prev);
+      if (next.has(item.id) || allThoughtsRef.current) {
+        next.delete(item.id);
+      } else {
+        next.add(item.id);
+      }
+      return next;
+    });
+  }, []);
+  const allThoughtsRef = useRef(false);
+  allThoughtsRef.current = allThoughts;
   const nextItemId = useRef(1);
   const visibleRef = useRef([]);
+  // The transcript as last drawn, for a click to find its item.
+  const shownRef = useRef({ visible: [], heights: [], room: 0, cutBottom: 0, below: 0, width: 80 });
   // The side panel (sidebar.js): auto on a wide terminal, /sidebar sets it.
   // On, as OpenCode keeps it: shown whenever the terminal has the room.
   const [sidebarPref, setSidebarPref] = useState('on');
@@ -1143,14 +1163,30 @@ export function App({
   // before the `/` was typed, menu empty — so Enter sent "/" as a command
   // instead of picking the row the arrows had marked.
   const menuNow = useRef({ menu: [], cursor: 0, pick: () => {}, submit: () => {} });
-  const onComposerSubmit = useCallback(value => {
-    const now = menuNow.current;
-    if (now.menu.length > 0) {
-      now.pick(now.menu[now.cursor]);
-    } else {
-      now.submit(value);
+  // What ↑ in the composer goes back through, oldest first: what was sent
+  // here, commands too, as a shell keeps them, and the messages of a
+  // resumed session.
+  const sentHistory = useRef([]);
+  const remember = useCallback(text => {
+    const h = sentHistory.current;
+    if (text.trim() !== '' && h[h.length - 1] !== text) {
+      h.push(text);
     }
   }, []);
+  const historyOf = useCallback(() => sentHistory.current, []);
+  const menuHasArrows = useCallback(() => menuNow.current.menu.length > 0, []);
+  const onComposerSubmit = useCallback(
+    value => {
+      const now = menuNow.current;
+      if (now.menu.length > 0) {
+        now.pick(now.menu[now.cursor]);
+      } else {
+        remember(value);
+        now.submit(value);
+      }
+    },
+    [remember],
+  );
   const pickFromMenu = row => {
     if (row.settle !== undefined) {
       pickRef(row, false);
@@ -1169,6 +1205,22 @@ export function App({
   // approval is asked, when the composer is not there to type into and y,
   // n and esc answer it.
   useInput((input, key) => {
+    // The mouse, as SGR reports (index.js asks for them): Ink names none of
+    // it, and hands the sequences over as the input (mouse.js).
+    const reports = parseMouse(input);
+    if (reports !== undefined) {
+      for (const mouse of reports) {
+        if (mouse.wheel !== 0) {
+          setScrollLines(v => Math.max(0, v + mouse.wheel * WHEEL_LINES));
+        } else if (mouse.press && mouse.button === 0) {
+          const hit = thoughtAtRow({ ...shownRef.current, row: mouse.row });
+          if (hit !== undefined) {
+            toggleThought(hit);
+          }
+        }
+      }
+      return;
+    }
     if (asks.length > 0 && approvals.length === 0 && !(key.ctrl && input === 'c')) {
       setAsks(prev => {
         if (prev.length === 0) {
@@ -1240,27 +1292,20 @@ export function App({
       } else {
         const target = [...visibleRef.current].reverse().find(i => i.reasoning);
         if (target !== undefined) {
-          setOpenThoughts(prev => {
-            const next = new Set(prev);
-            if (next.has(target.id)) {
-              next.delete(target.id);
-            } else {
-              next.add(target.id);
-            }
-            return next;
-          });
+          toggleThought(target);
         }
       }
     } else if (key.pageUp) {
       setScrollLines(v => v + viewportStep.current);
     } else if (key.pageDown) {
       setScrollLines(v => Math.max(0, v - viewportStep.current));
-    } else if (key.upArrow) {
-      // Three lines, as a notch of the wheel goes: the terminal sends the
-      // wheel as these (1007), and half a screen a notch lost the place.
-      setScrollLines(v => v + ARROW_LINES);
-    } else if (key.downArrow) {
-      setScrollLines(v => Math.max(0, v - ARROW_LINES));
+    } else if (viewer !== undefined && key.upArrow) {
+      // Watching a subagent there is no composer: the arrows scroll. In the
+      // session they are the composer's (rows, then the history) — the
+      // wheel scrolls, now that the TUI has the mouse.
+      setScrollLines(v => v + WHEEL_LINES);
+    } else if (viewer !== undefined && key.downArrow) {
+      setScrollLines(v => Math.max(0, v - WHEEL_LINES));
     }
   });
 
@@ -1322,6 +1367,7 @@ export function App({
           if (replaying.current && data.source?.kind === 'user') {
             const text = contentText(data.content ?? []);
             if (text !== '') {
+              remember(text);
               pushItem({ kind: 'user', text: shownMentions(text) });
             }
           }
@@ -2219,6 +2265,15 @@ export function App({
   });
   const { visible, scrollLines: clampedLines, atBottom, step, cutBottom, totalLines } = viewport;
   visibleRef.current = visible;
+  shownRef.current = {
+    visible,
+    heights: viewport.visibleHeights,
+    room,
+    cutBottom,
+    below: viewport.below,
+    width,
+    open: thoughtOpen,
+  };
   useEffect(() => {
     viewportStep.current = step;
   }, [step]);
@@ -2439,6 +2494,8 @@ export function App({
                   // Its columns: the prompt's two and the paddings are not.
                   width: Math.max(10, cols - 4),
                   onHeight: setComposerHeight,
+                  history: historyOf,
+                  arrowsTaken: menuHasArrows,
                   placeholder: 'Ask anything',
                 }),
               ),
@@ -2719,6 +2776,7 @@ export function computeViewport({
   // much. Scrolled by items, a turn of the wheel inside a long answer moved
   // nothing until it passed the answer, and then jumped.
   let visible = [];
+  let visibleHeights = [];
   let cutBottom = 0;
   let overflowTop = false;
   if (items.length > 0) {
@@ -2746,9 +2804,12 @@ export function computeViewport({
       }
     }
     visible = items.slice(startIdx, endIdx + 1);
+    visibleHeights = heights.slice(startIdx, endIdx + 1);
   }
   return {
     visible,
+    visibleHeights,
+    below: lines === 0 ? below : 0,
     cutBottom,
     totalLines: totalLines + below,
     scrollLines: lines,
@@ -2811,3 +2872,28 @@ export {
   markdownLines,
   splitCodeBlocks,
 };
+
+/**
+ * The item whose thought — its "▸ thinking" line or the thought under it —
+ * is at a screen row (1-based), or undefined. The transcript is laid out
+ * from the bottom of its room: the last visible item ends `cutBottom`
+ * lines below the room's foot, over the answer streaming in (`below`).
+ */
+export function thoughtAtRow({ visible, heights, room, cutBottom, below, width, open, row }) {
+  let bottom = room - below + cutBottom;
+  for (let i = visible.length - 1; i >= 0; i--) {
+    const top = bottom - heights[i] + 1;
+    if (row >= top && row <= bottom) {
+      const item = visible[i];
+      if (item?.kind !== 'assistant' || !item.reasoning) {
+        return undefined;
+      }
+      // The item's first line is its margin; then the thought's head and,
+      // open, its lines.
+      const lines = thinkingView(item.reasoning, width, open?.(item) ?? false).lines.length;
+      return row >= top + 1 && row <= top + 1 + lines ? item : undefined;
+    }
+    bottom = top - 1;
+  }
+  return undefined;
+}
