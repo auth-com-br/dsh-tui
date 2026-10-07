@@ -41,7 +41,7 @@ export TOKENDANCE_API_KEY=sk-...   # or add it to ~/.dsh/.credentials.yaml (0600
 dsh --profile tui                  # open the TUI
 ```
 
-In the TUI: the wheel scrolls, `↑`/`↓` recall earlier messages, a click (or `ctrl + t`) opens or folds a thought, `esc` interrupts the running turn, `/help` shows all keys and commands. The TUI takes the mouse, so text is selected with `shift + drag` (`alt + drag` inside tend).
+In the TUI: the wheel and `↑`/`↓` scroll, `ctrl + ↑`/`ctrl + ↓` recall earlier messages, `ctrl + t` opens or folds a thought, `esc` interrupts the running turn, `/help` shows all keys and commands. The mouse stays the terminal's, so dragging selects text; `/mouse on` lets the TUI take it, to open a thought with a click.
 
 ## What it does
 
@@ -122,6 +122,7 @@ pnpm format       # auto-format all source files
 ```
 
 **On every `git commit`** (husky + lint-staged):
+
 - staged `*.js` files → `prettier --write` + `eslint --fix` before the commit lands
 - committed code is always clean — no manual `pnpm format` needed
 
@@ -133,19 +134,20 @@ pnpm deps:update  # bump package.json to latest compatible + pnpm install
 ```
 
 **GitHub Actions auto-runs** (`.github/workflows/deps.yml`):
+
 - Every Monday 06:00 UTC
 - Creates a `deps/auto-update-YYYYMMDD` branch + PR when updates exist
 - Manual trigger available from the GitHub Actions tab
 
 ### CI gate (`.github/workflows/ci.yml`)
 
-| Trigger | Job | Matrix |
-|---------|-----|--------|
-| `push` / `pull_request` to main | `inspect` | Node 20 + Node 22 |
-| | lint | ✅ |
-| | format:check | ✅ |
-| | test (57 cases) | ✅ |
-| | coverage upload | Node 22 only |
+| Trigger                         | Job             | Matrix            |
+| ------------------------------- | --------------- | ----------------- |
+| `push` / `pull_request` to main | `inspect`       | Node 20 + Node 22 |
+|                                 | lint            | ✅                |
+|                                 | format:check    | ✅                |
+|                                 | test (57 cases) | ✅                |
+|                                 | coverage upload | Node 22 only      |
 
 Any stage failure blocks the merge — main is always green.
 

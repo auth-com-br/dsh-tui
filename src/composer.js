@@ -295,12 +295,15 @@ export const Composer = React.forwardRef(function Composer(
   useInput((input, key) => {
     if ((key.upArrow || key.downArrow) && !arrowsTaken?.()) {
       const dir = key.upArrow ? -1 : 1;
-      const moved = moveRow(current.current, width, dir);
+      // Plain ↑/↓ move between the rows of a long message, and are the
+      // transcript's at its edges (the wheel arrives as them); ctrl+↑/↓
+      // go through the history.
+      const moved = key.ctrl ? undefined : moveRow(current.current, width, dir);
       if (moved !== undefined) {
         commit({ ...current.current, cursor: moved });
-      } else {
-        // ↑ on the first row: the message before; ↓ on the last: the one
-        // after, and past the newest, the draft that was being written.
+      } else if (key.ctrl) {
+        // ctrl+↑: the message before; ctrl+↓: the one after, and past the
+        // newest, the draft that was being written.
         const all = history?.() ?? [];
         const h = hist.current;
         const next = h.index + (dir === -1 ? 1 : -1);

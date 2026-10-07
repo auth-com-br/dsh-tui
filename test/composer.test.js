@@ -109,10 +109,10 @@ test('↑ and ↓ move between the rows of a long message, and stop at its edges
   assert.equal(
     moveRow({ text: 'abcdef\nxy', cursor: 1 }, 4, -1),
     undefined,
-    'the first row: history',
+    'the first row: the transcript scrolls',
   );
   assert.equal(moveRow({ text: 'abcdef\nxy', cursor: 1 }, 4, 1), 5, 'down from "b" to "f"');
-  assert.equal(moveRow(line, 4, 1), undefined, 'the last row: history');
+  assert.equal(moveRow(line, 4, 1), undefined, 'the last row: the transcript scrolls');
 });
 
 test('a mouse report is not typed into the composer', () => {

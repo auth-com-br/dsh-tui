@@ -108,6 +108,13 @@ const TUI_COMMANDS = [
     hint: 'all | none',
   },
   {
+    name: 'mouse',
+    description: 'take the mouse (click a thought) or give it back (drag selects)',
+    kind: 'command',
+    takesInput: true,
+    hint: '[on|off]',
+  },
+  {
     name: 'sidebar',
     description: 'the side panel: context used, tokens, files',
     kind: 'command',
@@ -201,11 +208,11 @@ const HELP_TEXT = [
   '  @path         refer to a file or folder; @ also lists other sessions',
   '  /exit, /quit  quit dsh tui',
   'keys:',
-  '  wheel          scroll transcript',
-  '  ↑ / ↓          the message history (rows, in a long message)',
+  '  wheel, ↑ / ↓   scroll transcript (rows, in a long message)',
+  '  ctrl + ↑ / ↓   the message history',
   '  page up/down   scroll by page',
-  '  click          open or fold a thought',
-  '  shift + drag   select text (alt + drag inside tend)',
+  '  drag           select text',
+  '  /mouse on|off  the TUI takes the mouse: click a thought to open it',
   '  esc            back to latest',
   '  ctrl + t       toggle thinking display',
   '  ctrl + c       quit',
@@ -852,6 +859,7 @@ export function App({
   feedback,
   contextWindow,
   reassertRawMode,
+  setMouse,
 }) {
   // The message that closed the last turn: what /rate rates.
   const lastAnswerId = useRef(undefined);
@@ -871,6 +879,9 @@ export function App({
   const composerApi = useRef(null);
   // The composer's height in lines, which it says when it changes.
   const [composerHeight, setComposerHeight] = useState(1);
+  // Whether the TUI has the mouse (/mouse on): off, the terminal keeps it
+  // and dragging selects text.
+  const [mouseOn, setMouseOn] = useState(false);
   const onComposerChange = useCallback(text => {
     composerText.current = text;
     setMirror(text.startsWith('/') || activeAtToken(text) !== undefined ? text : '');
@@ -1299,12 +1310,12 @@ export function App({
       setScrollLines(v => v + viewportStep.current);
     } else if (key.pageDown) {
       setScrollLines(v => Math.max(0, v - viewportStep.current));
-    } else if (viewer !== undefined && key.upArrow) {
-      // Watching a subagent there is no composer: the arrows scroll. In the
-      // session they are the composer's (rows, then the history) — the
-      // wheel scrolls, now that the TUI has the mouse.
+    } else if (key.upArrow && !key.ctrl && (viewer !== undefined || composerHeight <= 1)) {
+      // Three lines, as a notch of the wheel goes: the terminal sends the
+      // wheel as these (1007), so ↑/↓ scroll. A message of several lines
+      // keeps them for moving between its rows; ctrl+↑/↓ is the history.
       setScrollLines(v => v + WHEEL_LINES);
-    } else if (viewer !== undefined && key.downArrow) {
+    } else if (key.downArrow && !key.ctrl && (viewer !== undefined || composerHeight <= 1)) {
       setScrollLines(v => Math.max(0, v - WHEEL_LINES));
     }
   });
@@ -1978,6 +1989,20 @@ export function App({
         void modelsFlow({ ask, say }, modelsService).catch(error =>
           say(`✗ ${error instanceof Error ? error.message : String(error)}`, true),
         );
+        return;
+      }
+      if (text === '/mouse' || text.startsWith('/mouse ')) {
+        setInput('');
+        const arg = text.slice('/mouse'.length).trim();
+        const on = arg === 'on' ? true : arg === 'off' ? false : !mouseOn;
+        setMouseOn(on);
+        setMouse?.(on);
+        pushItem({
+          kind: 'status',
+          text: on
+            ? 'mouse on: the wheel scrolls and a click opens a thought; select text with shift+drag (alt+drag inside tend) · /mouse off'
+            : 'mouse off: drag selects text; the wheel scrolls as ↑/↓ · /mouse on for clicking thoughts',
+        });
         return;
       }
       if (text === '/thinking' || text.startsWith('/thinking ')) {

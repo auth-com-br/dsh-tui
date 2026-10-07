@@ -48,7 +48,10 @@ export const inject = ['agentDefaultModel', 'agents', 'sessions', 'sessionPersis
  */
 let uiHandler = undefined;
 
-const ENTER_SCREEN = '\x1b[?1049h\x1b[?1000h\x1b[?1006h\x1b[2J\x1b[H';
+const ENTER_SCREEN = '\x1b[?1049h\x1b[?1007h\x1b[2J\x1b[H';
+// The mouse, reported as SGR, while /mouse on has it.
+const MOUSE_ON = '\x1b[?1000h\x1b[?1006h';
+const MOUSE_OFF = '\x1b[?1006l\x1b[?1000l';
 let screenLeft = false;
 /** The main screen again, once, however the TUI ends. */
 function leaveScreen() {
@@ -57,7 +60,7 @@ function leaveScreen() {
   }
   screenLeft = true;
   try {
-    process.stdout.write('\x1b[?1006l\x1b[?1000l\x1b[?1049l');
+    process.stdout.write(MOUSE_OFF + '\x1b[?1007l\x1b[?1049l');
   } catch {
     // The terminal has gone.
   }
@@ -613,6 +616,11 @@ async function run(ctx, exit) {
         // changed under the TUI (icrnl on made Enter arrive as \n and send
         // nothing). Off then on: libuv skips a mode it thinks it is in, and
         // it cannot see a change made by another process.
+        setMouse: on => {
+          if (process.stdout.isTTY) {
+            process.stdout.write(on ? MOUSE_ON : MOUSE_OFF);
+          }
+        },
         reassertRawMode: () => {
           const stdin = process.stdin;
           if (!stdin.isTTY || typeof stdin.setRawMode !== 'function' || !stdin.isRaw) {
@@ -774,11 +782,12 @@ async function run(ctx, exit) {
   // and a stdio MCP server's banner ("… running on stdio": its stderr is
   // inherited, with no setting in dsh-mcp-client) were left above it.
   //
-  // With it, the mouse (1000, reported as SGR, 1006): the wheel scrolls the
-  // transcript — the TUI redraws in place, so its past is not in the
-  // terminal's scrollback — and a click opens a thought. The wheel used to
-  // come as arrow keys (1007), which left ↑ unable to recall a message.
-  // Selecting text is shift+drag now, as in any program that has the mouse.
+  // With it, 1007: the terminal sends the wheel as the arrow keys, which
+  // scroll the transcript — the TUI redraws in place, so its past is not in
+  // the terminal's scrollback — and the mouse stays the terminal's, so
+  // dragging selects text as in any terminal. Taking the mouse (the wheel
+  // and a click on a thought as mouse reports) cost exactly that, and text
+  // has to be selectable: it is /mouse on, for whoever wants it.
   if (process.stdout.isTTY) {
     // Whatever was written on it while the harness loaded.
     process.stdout.write('\x1b[2J\x1b[H');
