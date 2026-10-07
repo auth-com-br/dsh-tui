@@ -23,6 +23,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { parseMouse } from './mouse.js';
 import { nthAnswer } from './clipboard.js';
+import { lineSpan, selectedText, cutColumns } from './selection.js';
 import { Composer } from './composer.js';
 import { newQuestions, questionKey, questionLines, answersOf } from './questions.js';
 import { whenOf } from './sessions.js';
@@ -40,7 +41,7 @@ import { pluginsText } from './plugins.js';
 import { THEMES } from './theme.js';
 import { pathArg, imageLabel, contentText } from './attachments.js';
 import { parseRate, ratingText } from './feedback.js';
-import { layoutMarkdown } from './markdown.js';
+import { layoutMarkdown, lineText } from './markdown.js';
 import { newSpeed, foldSpeed, liveRate, fmtRate, totalsText } from './speed.js';
 import { foldInstructions, changesText, instructionsText } from './instructions.js';
 import { SIDEBAR_WIDTH, sidebarShown, sidebarLines } from './sidebar.js';
@@ -117,7 +118,7 @@ const TUI_COMMANDS = [
   },
   {
     name: 'mouse',
-    description: 'take the mouse (click a thought) or give it back (drag selects)',
+    description: 'give the mouse to the terminal, or take it back (selection in the conversation)',
     kind: 'command',
     takesInput: true,
     hint: '[on|off]',
@@ -219,9 +220,10 @@ const HELP_TEXT = [
   '  wheel, ↑ / ↓   scroll transcript (rows, in a long message)',
   '  ctrl + ↑ / ↓   the message history',
   '  page up/down   scroll by page',
-  '  drag           select text',
+  '  drag           select in the conversation; copied when you let go',
+  '  click          open or fold a thought',
   '  /copy [n]      copy the last answer (or the n-th back), its text alone',
-  '  /mouse on|off  the TUI takes the mouse: click a thought to open it',
+  '  /mouse off|on  give the mouse to the terminal (its own selection) or take it back',
   '  esc            back to latest',
   '  ctrl + t       toggle thinking display',
   '  ctrl + c       quit',
@@ -559,7 +561,34 @@ class ErrorBoundary extends React.Component {
 
 // Memoised: a row whose item, width, fold and theme are unchanged is not
 // drawn again — a turn of the wheel re-rendered every row on screen.
-const ChatRow = React.memo(function ChatRow({ item, width, thinkingOpen, themeBg }) {
+const ChatRow = React.memo(function ChatRow({ item, width, thinkingOpen, themeBg, selected }) {
+  if (selected !== undefined) {
+    // Part of it selected: drawn as its plain lines, the selected columns
+    // inverted — the same lines selecting reads, so what shows is what is
+    // copied. Its colours come back when the selection goes.
+    return el(
+      Box,
+      { flexDirection: 'column', flexShrink: 0 },
+      ...itemLines(item, width, thinkingOpen).map((line, i) => {
+        const span = selected[i];
+        if (span === undefined) {
+          return el(
+            Text,
+            { key: i, wrap: 'truncate-end', dimColor: true },
+            line === '' ? ' ' : line,
+          );
+        }
+        const { before, mid, after } = cutColumns(line, span[0], span[1]);
+        return el(
+          Text,
+          { key: i, wrap: 'truncate-end' },
+          before,
+          el(Text, { inverse: true }, mid === '' ? ' ' : mid),
+          after,
+        );
+      }),
+    );
+  }
   switch (item.kind) {
     case 'user': {
       // Faint derived background + cyan ▌ prefix (Codex user-message style).
@@ -891,7 +920,11 @@ export function App({
   const [composerHeight, setComposerHeight] = useState(1);
   // Whether the TUI has the mouse (/mouse on): off, the terminal keeps it
   // and dragging selects text.
-  const [mouseOn, setMouseOn] = useState(false);
+  const [mouseOn, setMouseOn] = useState(true);
+  // The text selected in the transcript (selection.js), and where a drag
+  // began: {anchor, focus} in items, lines and columns.
+  const [selection, setSelection] = useState(null);
+  const dragFrom = useRef(null);
   const onComposerChange = useCallback(text => {
     composerText.current = text;
     setMirror(text.startsWith('/') || activeAtToken(text) !== undefined ? text : '');
@@ -1233,14 +1266,59 @@ export function App({
       for (const mouse of reports) {
         if (mouse.wheel !== 0) {
           setScrollLines(v => Math.max(0, v + mouse.wheel * WHEEL_LINES));
-        } else if (mouse.press && mouse.button === 0) {
-          const hit = thoughtAtRow({ ...shownRef.current, row: mouse.row });
-          if (hit !== undefined) {
-            toggleThought(hit);
+          continue;
+        }
+        if (mouse.button !== 0 && !mouse.release) {
+          continue;
+        }
+        const shown = shownRef.current;
+        const at = pointAtRow({ ...shown, row: mouse.row, col: mouse.col, items });
+        if (mouse.press) {
+          dragFrom.current = { at, row: mouse.row, col: mouse.col, moved: false };
+          setSelection(null);
+        } else if (mouse.motion && dragFrom.current) {
+          const from = dragFrom.current;
+          if (from.at && at) {
+            from.moved = from.moved || mouse.row !== from.row || mouse.col !== from.col;
+            setSelection({ anchor: from.at, focus: at });
+          }
+          // Dragged against the top or the bottom of the transcript: it
+          // scrolls under the pointer, a line a move.
+          if (mouse.row <= 1) {
+            setScrollLines(v => v + 1);
+          } else if (mouse.row >= shown.room) {
+            setScrollLines(v => Math.max(0, v - 1));
+          }
+        } else if (mouse.release) {
+          const from = dragFrom.current;
+          dragFrom.current = null;
+          if (from && !from.moved) {
+            // A click, not a drag: on a thought, it opens or folds it.
+            const hit = thoughtAtRow({ ...shown, row: mouse.row });
+            if (hit !== undefined) {
+              toggleThought(hit);
+            }
+          } else if (from && from.at && at) {
+            const sel = { anchor: from.at, focus: at };
+            const text = selectedText(sel, i =>
+              itemLines(items[i], shown.width, thoughtOpen(items[i])),
+            );
+            setSelection(sel);
+            if (text !== '') {
+              // Copied on release, as OpenCode copies on select.
+              Promise.resolve(copy?.(text)).then(
+                () => flashHint(`copied ${text.length} characters`),
+                () => flashHint('could not copy'),
+              );
+            }
           }
         }
       }
       return;
+    }
+    // A key ends a selection: it was made to be copied, and has been.
+    if (selection !== null) {
+      setSelection(null);
     }
     if (asks.length > 0 && approvals.length === 0 && !(key.ctrl && input === 'c')) {
       setAsks(prev => {
@@ -2031,8 +2109,8 @@ export function App({
         pushItem({
           kind: 'status',
           text: on
-            ? 'mouse on: the wheel scrolls and a click opens a thought; select text with shift+drag (alt+drag inside tend) · /mouse off'
-            : 'mouse off: drag selects text; the wheel scrolls as ↑/↓ · /mouse on for clicking thoughts',
+            ? 'mouse on: a drag selects in the conversation and copies it; the wheel scrolls; a click opens a thought · /mouse off'
+            : "mouse off: the terminal's own selection (whole rows, the side panel too); the wheel scrolls as ↑/↓ · /mouse on",
         });
         return;
       }
@@ -2423,7 +2501,14 @@ export function App({
       { resetKey: items.length },
       welcome,
       ...visible.map((item, index) =>
-        el(ChatRow, { key: index, item, width, thinkingOpen: thoughtOpen(item), themeBg }),
+        el(ChatRow, {
+          key: index,
+          item,
+          width,
+          thinkingOpen: thoughtOpen(item),
+          themeBg,
+          selected: selectionSpans(selection, items.indexOf(item), item, width, thoughtOpen(item)),
+        }),
       ),
       ...(clampedLines === 0
         ? [el(StreamBlock, { key: 'stream', stream, width, thinkingOpen: allThoughts, themeBg })]
@@ -2730,6 +2815,73 @@ function itemHeight(item, width, thinkingOpen) {
   return h;
 }
 
+/**
+ * An item's lines as plain text, as ChatRow draws them, from the column the
+ * transcript's text starts at — what selecting reads (selection.js). One
+ * line per row the item takes: estimateItemLines counts these.
+ */
+export function itemLines(item, width, thinkingOpen = true) {
+  const text = item && typeof item.text === 'string' ? item.text : '';
+  switch (item && item.kind) {
+    case 'user':
+      return prefixedLines(text, width - TRANSCRIPT_PAD - USER_LINE_PAD, '▌ ', 2).map(l => ' ' + l);
+    case 'assistant': {
+      const lines = [''];
+      if (item.reasoning !== undefined && item.reasoning !== '') {
+        const view = thinkingView(item.reasoning, width, thinkingOpen);
+        lines.push(view.heading, ...view.lines.map(l => `    ${l}`));
+      }
+      if (text !== '') {
+        const avail = Math.max(1, width - TRANSCRIPT_PAD - MARKDOWN_GUTTER);
+        layoutMarkdown(text, avail).forEach((segs, i) =>
+          lines.push((i === 0 ? '• ' : '  ') + lineText(segs)),
+        );
+      }
+      if (item.usage) {
+        lines.push(`  ${usageText(item.usage)}${item.rate ? ` · ${fmtRate(item.rate)}` : ''}`);
+      }
+      return lines;
+    }
+    case 'tool': {
+      const done = item.status === 'done';
+      const failed = item.status === 'error';
+      const mark = failed ? '✗' : done ? '✓' : '·';
+      const label = done || failed ? '' : 'Running ';
+      const seconds =
+        typeof item.seconds === 'number' ? ` • ${fmtDuration(item.seconds * 1000)}` : '';
+      const cmd = truncate(
+        `${item.name} ${truncate(item.args, MAX_TOOL_ARGS)}`.trim(),
+        Math.max(12, width - 16),
+      );
+      const lines = ['', `  ${mark} ${label}${cmd}${seconds}`];
+      const out = splitOutput(item.output);
+      if (out !== null) {
+        for (const line of out.lines) {
+          for (const wrapped of wrapText(line, Math.max(1, width - 6))) {
+            lines.push(`    ${wrapped}`);
+          }
+        }
+        if (out.omitted > 0) {
+          lines.push(`    … +${out.omitted} lines`);
+        }
+      }
+      if (failed && item.error) {
+        lines.push(
+          truncate(
+            `    error: ${item.error.code ?? item.error.name ?? 'unknown'}`,
+            Math.max(12, width - 2),
+          ),
+        );
+      }
+      return lines;
+    }
+    case 'divider':
+      return ['  ' + '─'.repeat(Math.min(48, width - 4))];
+    default:
+      return wrapText(String(item && item.text ? item.text : ''), Math.max(1, width - 2));
+  }
+}
+
 export function estimateItemLines(item, width, thinkingOpen = true) {
   const avail = Math.max(1, width - 6);
   const text = item && typeof item.text === 'string' ? item.text : '';
@@ -2935,6 +3087,49 @@ export {
  * from the bottom of its room: the last visible item ends `cutBottom`
  * lines below the room's foot, over the answer streaming in (`below`).
  */
+/**
+ * The spans of an item's lines a selection covers, undefined when it
+ * covers none — a row with nothing selected keeps its memo.
+ */
+function selectionSpans(selection, index, item, width, open) {
+  if (selection === null || index < 0) {
+    return undefined;
+  }
+  const lines = itemLines(item, width, open);
+  const spans = lines.map((_, i) => lineSpan(selection, index, i));
+  return spans.some(s => s !== undefined) ? spans : undefined;
+}
+
+/**
+ * The point of the transcript at a screen row and column (1-based), as a
+ * selection holds it: the item's index in `items`, its line, the column in
+ * that line. Above the first line shown is that line; below the last, the
+ * last. undefined with nothing shown.
+ */
+export function pointAtRow({ visible, heights, room, cutBottom, below, row, col, items }) {
+  if (visible.length === 0) {
+    return undefined;
+  }
+  // The transcript's text starts at the third column: the frame's first,
+  // and the transcript's padding.
+  const at = Math.max(0, col - 2);
+  let bottom = room - below + cutBottom;
+  let first;
+  for (let i = visible.length - 1; i >= 0; i--) {
+    const top = bottom - heights[i] + 1;
+    const index = items.indexOf(visible[i]);
+    if (i === visible.length - 1 && row > bottom) {
+      return { item: index, line: heights[i] - 1, col: at };
+    }
+    if (row >= top && row <= bottom) {
+      return { item: index, line: row - top, col: at };
+    }
+    first = { item: index, line: Math.max(0, 1 - top), col: 0 };
+    bottom = top - 1;
+  }
+  return first;
+}
+
 export function thoughtAtRow({ visible, heights, room, cutBottom, below, width, open, row }) {
   let bottom = room - below + cutBottom;
   for (let i = visible.length - 1; i >= 0; i--) {

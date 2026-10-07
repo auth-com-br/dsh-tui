@@ -49,10 +49,12 @@ export const inject = ['agentDefaultModel', 'agents', 'sessions', 'sessionPersis
  */
 let uiHandler = undefined;
 
-const ENTER_SCREEN = '\x1b[?1049h\x1b[?1007h\x1b[2J\x1b[H';
-// The mouse, reported as SGR, while /mouse on has it.
-const MOUSE_ON = '\x1b[?1000h\x1b[?1006h';
-const MOUSE_OFF = '\x1b[?1006l\x1b[?1000l';
+// The mouse, reported as SGR with drags (1000 + 1002 + 1006), while the TUI
+// has it — by default, so a drag selects in the transcript alone; and 1007
+// for when /mouse off gives it back, the wheel then arriving as arrows.
+const MOUSE_ON = '\x1b[?1000h\x1b[?1002h\x1b[?1006h';
+const MOUSE_OFF = '\x1b[?1006l\x1b[?1002l\x1b[?1000l';
+const ENTER_SCREEN = '\x1b[?1049h\x1b[?1007h' + MOUSE_ON + '\x1b[2J\x1b[H';
 let screenLeft = false;
 /** The main screen again, once, however the TUI ends. */
 function leaveScreen() {
@@ -789,12 +791,11 @@ async function run(ctx, exit) {
   // and a stdio MCP server's banner ("… running on stdio": its stderr is
   // inherited, with no setting in dsh-mcp-client) were left above it.
   //
-  // With it, 1007: the terminal sends the wheel as the arrow keys, which
-  // scroll the transcript — the TUI redraws in place, so its past is not in
-  // the terminal's scrollback — and the mouse stays the terminal's, so
-  // dragging selects text as in any terminal. Taking the mouse (the wheel
-  // and a click on a thought as mouse reports) cost exactly that, and text
-  // has to be selectable: it is /mouse on, for whoever wants it.
+  // With it, the mouse: the wheel scrolls the transcript — the TUI redraws
+  // in place, so its past is not in the terminal's scrollback — a click
+  // opens a thought, and a drag selects text in the transcript and copies
+  // it, as OpenCode does (selection.js). Left to the terminal, a drag took
+  // whole rows, the side panel with them. /mouse off gives it back.
   if (process.stdout.isTTY) {
     // Whatever was written on it while the harness loaded.
     process.stdout.write('\x1b[2J\x1b[H');

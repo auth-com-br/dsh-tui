@@ -41,7 +41,7 @@ export TOKENDANCE_API_KEY=sk-...   # or add it to ~/.dsh/.credentials.yaml (0600
 dsh --profile tui                  # open the TUI
 ```
 
-In the TUI: the wheel and `↑`/`↓` scroll, `ctrl + ↑`/`ctrl + ↓` recall earlier messages, `ctrl + t` opens or folds a thought, `esc` interrupts the running turn, `/help` shows all keys and commands. `/copy` puts the last answer on the clipboard, its text alone (`/copy 2` the one before) — dragging selects whole rows, the side panel with them. The mouse stays the terminal's, so dragging selects text; `/mouse on` lets the TUI take it, to open a thought with a click.
+In the TUI: a drag selects text in the conversation alone — not the side panel, not the composer — and copies it when you let go, as OpenCode does; `/copy` copies the last answer whole (`/copy 2` the one before). The wheel and `↑`/`↓` scroll, `ctrl + ↑`/`ctrl + ↓` recall earlier messages, a click (or `ctrl + t`) opens or folds a thought, `esc` interrupts the running turn, `/help` shows all keys and commands. `/mouse off` gives the mouse back to the terminal and its own selection.
 
 ## What it does
 
