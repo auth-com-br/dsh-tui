@@ -15,6 +15,7 @@ import { render } from 'ink';
 import { installModelSelection } from '@deepseek-ai/dsh-agent';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { App } from './ui.js';
+import { copyText } from './clipboard.js';
 import {
   parseArgs,
   USAGE,
@@ -616,6 +617,12 @@ async function run(ctx, exit) {
         // changed under the TUI (icrnl on made Enter arrive as \n and send
         // nothing). Off then on: libuv skips a mode it thinks it is in, and
         // it cannot see a change made by another process.
+        copy: text =>
+          copyText(text, s => {
+            if (process.stdout.isTTY) {
+              process.stdout.write(s);
+            }
+          }),
         setMouse: on => {
           if (process.stdout.isTTY) {
             process.stdout.write(on ? MOUSE_ON : MOUSE_OFF);

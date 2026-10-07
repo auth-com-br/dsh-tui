@@ -22,6 +22,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { parseMouse } from './mouse.js';
+import { nthAnswer } from './clipboard.js';
 import { Composer } from './composer.js';
 import { newQuestions, questionKey, questionLines, answersOf } from './questions.js';
 import { whenOf } from './sessions.js';
@@ -106,6 +107,13 @@ const TUI_COMMANDS = [
     kind: 'command',
     takesInput: true,
     hint: 'all | none',
+  },
+  {
+    name: 'copy',
+    description: 'copy an answer: its text alone, without the side panel',
+    kind: 'command',
+    takesInput: true,
+    hint: '[n: 1 the last, 2 the one before]',
   },
   {
     name: 'mouse',
@@ -212,6 +220,7 @@ const HELP_TEXT = [
   '  ctrl + ↑ / ↓   the message history',
   '  page up/down   scroll by page',
   '  drag           select text',
+  '  /copy [n]      copy the last answer (or the n-th back), its text alone',
   '  /mouse on|off  the TUI takes the mouse: click a thought to open it',
   '  esc            back to latest',
   '  ctrl + t       toggle thinking display',
@@ -860,6 +869,7 @@ export function App({
   contextWindow,
   reassertRawMode,
   setMouse,
+  copy,
 }) {
   // The message that closed the last turn: what /rate rates.
   const lastAnswerId = useRef(undefined);
@@ -1988,6 +1998,27 @@ export function App({
         const say = (line, error = false) => pushItem({ kind: 'status', text: line, error });
         void modelsFlow({ ask, say }, modelsService).catch(error =>
           say(`✗ ${error instanceof Error ? error.message : String(error)}`, true),
+        );
+        return;
+      }
+      if (text === '/copy' || text.startsWith('/copy ')) {
+        setInput('');
+        const arg = text.slice('/copy'.length).trim();
+        const n = arg === '' ? 1 : Number.parseInt(arg, 10);
+        const answer = Number.isInteger(n) && n > 0 ? nthAnswer(items, n) : undefined;
+        if (answer === undefined) {
+          pushItem({
+            kind: 'status',
+            text: `no answer ${arg || ''} to copy — /copy is the last, /copy 2 the one before`,
+          });
+          return;
+        }
+        Promise.resolve(copy?.(answer)).then(
+          () =>
+            flashHint(
+              `copied ${n === 1 ? 'the last answer' : `answer ${n} back`} (${answer.length} characters)`,
+            ),
+          () => flashHint('could not copy'),
         );
         return;
       }
