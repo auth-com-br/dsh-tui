@@ -15,7 +15,7 @@ import { render } from 'ink';
 import { installModelSelection } from '@deepseek-ai/dsh-agent';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import { App } from './ui.js';
-import { copyText } from './clipboard.js';
+import { copyText, readClipboardImage } from './clipboard.js';
 import {
   parseArgs,
   USAGE,
@@ -428,6 +428,31 @@ async function run(ctx, exit) {
   const mount = (view = undefined) => {
     const { agent, firstSeq, selected, resumed } = current;
     mounts++;
+    // An image for the next message, from a file or the clipboard: its type
+    // checked, the model asked whether it takes images (as the web app's
+    // prompt does), and the image admitted to the attachment store, which
+    // normalizes and keeps it.
+    const attachBytes = async (data, name) => {
+      const attachments = ctx.get('attachments');
+      if (attachments === undefined) {
+        throw new Error('this profile keeps no attachments');
+      }
+      const mediaType = mediaTypeOf(data);
+      if (mediaType === undefined) {
+        throw new Error(`${name} is not a PNG, JPEG, WebP or GIF image`);
+      }
+      const now = current.selected?.current;
+      if (now !== undefined) {
+        const info = await ctx
+          .get('llm')
+          ?.resolveModelInfo?.(now.provider, now.model)
+          .catch(() => undefined);
+        if (info?.inputModalities !== undefined && !info.inputModalities.includes('image')) {
+          throw new Error(`${now.model} does not take images — /model to pick one that does`);
+        }
+      }
+      return attachments.saveImage({ data, mediaType, name });
+    };
     app = render(
       React.createElement(App, {
         key: `${agent.session.id}:${mounts}`,
@@ -683,14 +708,8 @@ async function run(ctx, exit) {
             }
           },
         },
-        // /image: the file read, its type checked, the model asked whether
-        // it takes images (as the web app's prompt does), and the image
-        // admitted to the attachment store, which normalizes and keeps it.
+        // /image, and an image file pasted or dropped: the file, attached.
         attachImage: async path => {
-          const attachments = ctx.get('attachments');
-          if (attachments === undefined) {
-            throw new Error('this profile keeps no attachments');
-          }
           const full = resolvePath(cwd, path);
           let data;
           try {
@@ -698,22 +717,19 @@ async function run(ctx, exit) {
           } catch {
             throw new Error(`cannot read ${full}`);
           }
-          const mediaType = mediaTypeOf(data);
-          if (mediaType === undefined) {
-            throw new Error(`${basename(full)} is not a PNG, JPEG, WebP or GIF image`);
-          }
-          const now = current.selected?.current;
-          if (now !== undefined) {
-            const info = await ctx
-              .get('llm')
-              ?.resolveModelInfo?.(now.provider, now.model)
-              .catch(() => undefined);
-            if (info?.inputModalities !== undefined && !info.inputModalities.includes('image')) {
-              throw new Error(`${now.model} does not take images — /model to pick one that does`);
-            }
-          }
-          return attachments.saveImage({ data, mediaType, name: basename(full) });
+          return attachBytes(data, basename(full));
         },
+        // ctrl+v: the image on the clipboard, attached; undefined when the
+        // clipboard holds none.
+        pasteImage: async () => {
+          const data = await readClipboardImage();
+          if (data === undefined) {
+            return undefined;
+          }
+          const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+          return attachBytes(new Uint8Array(data), `pasted-${stamp}`);
+        },
+
         settingsService: ctx.get('settings') && {
           describe: () => ctx.get('settings').describe(),
           mutate: (ns, ops) =>

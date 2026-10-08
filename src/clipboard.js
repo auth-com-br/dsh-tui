@@ -10,7 +10,7 @@
  * program copies.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 
 /** The clipboard programs tried, in order, with the arguments that write. */
 const PROGRAMS = [
@@ -85,4 +85,91 @@ export async function copyText(text, writeTerminal) {
     }
   }
   return undefined;
+}
+
+/** A program's output as bytes, or undefined when it fails or is missing. */
+function bytesOf(cmd, args) {
+  return new Promise(resolve => {
+    try {
+      execFile(cmd, args, { encoding: 'buffer', maxBuffer: 64 << 20, timeout: 5000 }, (err, out) =>
+        resolve(err ? undefined : out),
+      );
+    } catch {
+      resolve(undefined);
+    }
+  });
+}
+
+/** The image types the harness takes, in the order a clipboard's are tried. */
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
+/**
+ * The image on this machine's clipboard, as bytes, or undefined when it
+ * holds none (or there is no clipboard program, or no display: over ssh the
+ * clipboard is the other machine's). A terminal pastes text only; an image
+ * copied from a browser or a screenshot is on the clipboard as image data,
+ * and is read from it here, as Claude Code reads it on ctrl+v.
+ */
+export async function readClipboardImage() {
+  if (process.env.WAYLAND_DISPLAY) {
+    const types = await bytesOf('wl-paste', ['--list-types']);
+    const offered = types ? types.toString('utf8').split('\n') : [];
+    const type = IMAGE_TYPES.find(t => offered.includes(t));
+    if (type) {
+      const data = await bytesOf('wl-paste', ['--no-newline', '--type', type]);
+      if (data && data.length > 0) {
+        return data;
+      }
+    }
+  }
+  if (process.env.DISPLAY) {
+    const targets = await bytesOf('xclip', ['-selection', 'clipboard', '-t', 'TARGETS', '-o']);
+    const offered = targets ? targets.toString('utf8').split('\n') : [];
+    const type = IMAGE_TYPES.find(t => offered.includes(t));
+    if (type) {
+      const data = await bytesOf('xclip', ['-selection', 'clipboard', '-t', type, '-o']);
+      if (data && data.length > 0) {
+        return data;
+      }
+    }
+  }
+  if (process.platform === 'darwin') {
+    const data = await bytesOf('pngpaste', ['-']);
+    if (data && data.length > 0) {
+      return data;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The image files a paste names, when it names nothing else: what a file
+ * manager pastes, or drops into a terminal, for files — paths, quoted or
+ * with backslash escapes, or file:// URIs, one or several. undefined for
+ * any other text, which is typed as it is.
+ * @param {string} text
+ * @returns {string[] | undefined}
+ */
+export function pastedImagePaths(text) {
+  const tokens = [...text.trim().matchAll(/'([^']*)'|"([^"]*)"|((?:\\.|[^\s'"])+)/g)].map(
+    m => m[1] ?? m[2] ?? m[3].replace(/\\(.)/g, '$1'),
+  );
+  if (tokens.length === 0) {
+    return undefined;
+  }
+  const paths = [];
+  for (let t of tokens) {
+    if (t.startsWith('file://')) {
+      try {
+        t = decodeURIComponent(new URL(t).pathname);
+      } catch {
+        return undefined;
+      }
+    }
+    if (!/^(\/|~\/)/.test(t) || !/\.(png|jpe?g|webp|gif)$/i.test(t)) {
+      return undefined;
+    }
+    paths.push(t.startsWith('~/') ? (process.env.HOME ?? '') + t.slice(1) : t);
+  }
+  return paths;
 }

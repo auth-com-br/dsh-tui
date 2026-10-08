@@ -39,3 +39,15 @@ test('the terminal is always told, whether or not a clipboard program is there',
   }
   assert.equal(written, osc52('hi'));
 });
+
+// A file copied in a file manager, or dropped on the terminal, is pasted
+// as its path; image paths alone are attached, any other text is typed.
+test('a paste of image files is recognised, any other text is not', async () => {
+  const { pastedImagePaths } = await import('../src/clipboard.js');
+  assert.deepEqual(pastedImagePaths("'/home/u/Pictures/a b.png'"), ['/home/u/Pictures/a b.png']);
+  assert.deepEqual(pastedImagePaths('/tmp/x.JPG /tmp/y\\ z.webp'), ['/tmp/x.JPG', '/tmp/y z.webp']);
+  assert.deepEqual(pastedImagePaths('file:///home/u/shot%201.png'), ['/home/u/shot 1.png']);
+  assert.equal(pastedImagePaths('look at /tmp/x.png'), undefined);
+  assert.equal(pastedImagePaths('/tmp/notes.txt'), undefined);
+  assert.equal(pastedImagePaths('hello'), undefined);
+});

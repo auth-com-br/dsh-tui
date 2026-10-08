@@ -41,7 +41,7 @@ export TOKENDANCE_API_KEY=sk-...   # or add it to ~/.dsh/.credentials.yaml (0600
 dsh --profile tui                  # open the TUI
 ```
 
-In the TUI: a drag selects text in the conversation alone — not the side panel, not the composer — and copies it when you let go, as OpenCode does; `/copy` copies the last answer whole (`/copy 2` the one before). The wheel and `↑`/`↓` scroll, `ctrl + ↑`/`ctrl + ↓` recall earlier messages, a click (or `ctrl + t`) opens or folds a thought, `esc` interrupts the running turn, `/help` shows all keys and commands. `/mouse off` gives the mouse back to the terminal and its own selection.
+In the TUI: a drag selects text in the conversation alone — not the side panel, not the composer — and copies it when you let go, as OpenCode does; `ctrl + v` attaches the image on the clipboard, and pasting or dropping an image file attaches it (for a model that takes images); `/copy` copies the last answer whole (`/copy 2` the one before). The wheel and `↑`/`↓` scroll, `ctrl + ↑`/`ctrl + ↓` recall earlier messages, a click (or `ctrl + t`) opens or folds a thought, `esc` interrupts the running turn, `/help` shows all keys and commands. `/mouse off` gives the mouse back to the terminal and its own selection.
 
 ## What it does
 

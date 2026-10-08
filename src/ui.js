@@ -22,7 +22,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { parseMouse } from './mouse.js';
-import { nthAnswer } from './clipboard.js';
+import { nthAnswer, pastedImagePaths } from './clipboard.js';
 import { lineSpan, selectedText, cutColumns } from './selection.js';
 import { Composer } from './composer.js';
 import { newQuestions, questionKey, questionLines, answersOf } from './questions.js';
@@ -222,6 +222,7 @@ const HELP_TEXT = [
   '  page up/down   scroll by page',
   '  drag           select in the conversation; copied when you let go',
   '  click          open or fold a thought',
+  '  ctrl + v       attach the image on the clipboard; pasting an image file attaches it too',
   '  /copy [n]      copy the last answer (or the n-th back), its text alone',
   '  /mouse off|on  give the mouse to the terminal (its own selection) or take it back',
   '  esc            back to latest',
@@ -894,6 +895,7 @@ export function App({
   theme: initialTheme = 'auto',
   setTheme,
   attachImage,
+  pasteImage,
   feedback,
   contextWindow,
   reassertRawMode,
@@ -1217,6 +1219,39 @@ export function App({
   // before the `/` was typed, menu empty — so Enter sent "/" as a command
   // instead of picking the row the arrows had marked.
   const menuNow = useRef({ menu: [], cursor: 0, pick: () => {}, submit: () => {} });
+  // Images onto the next message, as /image puts them: from files a paste
+  // or a drop named, or from the clipboard (ctrl+v).
+  const attachFound = useRef(() => {});
+  attachFound.current = refs => {
+    setPendingImages(prev => [...prev, ...refs]);
+    flashHint(
+      `📎 ${refs.length === 1 ? 'image' : `${refs.length} images`} attached to the next message`,
+    );
+  };
+  const imageFailed = useRef(() => {});
+  imageFailed.current = error =>
+    pushItem({
+      kind: 'status',
+      text: `✗ ${error instanceof Error ? error.message : String(error)}`,
+      error: true,
+    });
+  // A paste that names image files, and nothing else, attaches them rather
+  // than typing their paths: a terminal pastes a file copied in a file
+  // manager, or dropped on it, as its path.
+  const onComposerPaste = useCallback(
+    text => {
+      const paths = pastedImagePaths(text);
+      if (paths === undefined || typeof attachImage !== 'function') {
+        return false;
+      }
+      Promise.all(paths.map(p => attachImage(p))).then(
+        refs => attachFound.current(refs),
+        error => imageFailed.current(error),
+      );
+      return true;
+    },
+    [attachImage],
+  );
   // What ↑ in the composer goes back through, oldest first: what was sent
   // here, commands too, as a shell keeps them, and the messages of a
   // resumed session.
@@ -1368,6 +1403,24 @@ export function App({
         setMenuClosedFor(composerText.current);
         return;
       }
+    }
+    if (key.ctrl && input === 'v' && typeof pasteImage === 'function') {
+      // The image on the clipboard: a terminal pastes text only, so the
+      // image a screenshot or a browser copied is read from the clipboard
+      // itself, as Claude Code does on ctrl+v.
+      void pasteImage().then(
+        ref => {
+          if (ref === undefined) {
+            flashHint(
+              'no image on the clipboard — copy one, paste an image file, or /image <path>',
+            );
+          } else {
+            attachFound.current([ref]);
+          }
+        },
+        error => imageFailed.current(error),
+      );
+      return;
     }
     if (key.ctrl && input === 'c') {
       // With something typed, the first ctrl+c clears it, as shells do: one
@@ -2635,6 +2688,7 @@ export function App({
                   // Its columns: the prompt's two and the paddings are not.
                   width: Math.max(10, cols - 4),
                   onHeight: setComposerHeight,
+                  onPaste: onComposerPaste,
                   history: historyOf,
                   arrowsTaken: menuHasArrows,
                   placeholder: 'Ask anything',

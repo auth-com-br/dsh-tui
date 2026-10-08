@@ -248,8 +248,9 @@ export function layoutComposer(line, width) {
  * `width` is its columns, and onHeight hears how many lines it takes when
  * that changes — rarely, so the App is not re-rendered by typing.
  * `history` gives the messages sent, oldest first, and `arrowsTaken` says
- * when ↑/↓ are someone else's (the `/` menu's).
- * @param {{onChange: (text: string) => void, onSubmit: (text: string) => void, placeholder?: string, initial?: string, width?: number, onHeight?: (lines: number) => void, history?: () => readonly string[], arrowsTaken?: () => boolean}} props
+ * when ↑/↓ are someone else's (the `/` menu's); `onPaste` may take a paste
+ * (true) before it is typed.
+ * @param {{onChange: (text: string) => void, onSubmit: (text: string) => void, placeholder?: string, initial?: string, width?: number, onHeight?: (lines: number) => void, history?: () => readonly string[], arrowsTaken?: () => boolean, onPaste?: (text: string) => boolean}} props
  */
 export const Composer = React.forwardRef(function Composer(
   {
@@ -261,6 +262,7 @@ export const Composer = React.forwardRef(function Composer(
     onHeight,
     history,
     arrowsTaken,
+    onPaste,
   },
   ref,
 ) {
@@ -293,6 +295,16 @@ export const Composer = React.forwardRef(function Composer(
   const hist = useRef({ index: -1, draft: '' });
 
   useInput((input, key) => {
+    // A paste the App takes (image files, attached rather than typed).
+    if (
+      input.length > 1 &&
+      !key.ctrl &&
+      !key.meta &&
+      !input.startsWith('\x1b') &&
+      onPaste?.(input)
+    ) {
+      return;
+    }
     if ((key.upArrow || key.downArrow) && !arrowsTaken?.()) {
       const dir = key.upArrow ? -1 : 1;
       // Plain ↑/↓ move between the rows of a long message, and are the
