@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dsh-tui</title>
+  <meta name="description" content="A terminal chat for the DeepSeek Harness: install it with one line and talk to AI agents right in your terminal.">
+  <link rel="alternate" hreflang="pt-BR" href="../">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../site.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="./">dsh<span>-tui</span></a>
+      <nav class="links">
+        <a href="#install">Install</a>
+        <a href="#keys">Keys</a>
+        <a href="https://github.com/auth-com-br/dsh-tui">GitHub</a>
+        <a href="../" hreflang="pt-BR">Português</a>
+      </nav>
+    </header>
+
+    <div class="hero">
+      <h1>The DeepSeek Harness in your terminal</h1>
+      <p class="lead">A terminal chat for the <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a>: the conversation is the screen, the agent's tools fold into single lines, and what it asks to do you approve with a click.</p>
+
+      <div class="install" id="install">
+        <div class="label">Install on Linux or macOS — copy and paste into your terminal:</div>
+        <div class="cmd">
+          <code id="cmd">curl -fsSL https://auth-com-br.github.io/dsh-tui/install.sh | sh</code>
+          <button class="copy" type="button" data-copy="cmd" data-done="copied">copy</button>
+        </div>
+      </div>
+      <p class="small">Then open it with <code>dsh-tui</code> and choose a model with <code>/models</code>. No <code>sudo</code>: everything goes into your home folder.</p>
+    </div>
+
+    <div class="term" aria-label="dsh-tui asking for approval to edit a file">
+      <div class="bar"><i></i><i></i><i></i></div>
+<pre> <span class="t-ok">✓</span> bash <span class="t-dim">ls src • 0.1s</span>
+   <span class="t-dim">composer.js  index.js  terminal.js  ui.js</span>
+
+ • Found the files. Updating the other project's README.
+
+   <span class="t-acc">⠸</span> Running edit <span class="t-dim">{"path":"/home/you/site/README.md"…</span>
+ <span class="t-dim">─ ⠏ Working 12s · ~40 tok/s ─────────────────── esc interrupt ─</span>
+ <span class="t-yel">▲ approval needed · edit</span>
+   <span class="t-dim">{"path":"/home/you/site/README.md","old":"…","new":"…"}</span>
+   escalate sandbox: the file is outside the workspace
+   <span class="t-sel">› 1. Allow once  (y)</span>
+     2. Reject  (n)
+   <span class="t-dim">↑↓ · enter or click · y allow · n/esc reject</span>
+   <span class="t-dim">deepseek-v4-flash · ~/project        ctrl+t thought   ctrl + c quit</span></pre>
+    </div>
+
+    <section>
+      <h2>What it does</h2>
+      <div class="grid">
+        <div class="card"><h3>The conversation is the screen</h3><p>No boxes, no chrome: the transcript is anchored at the bottom, always in view, with the model and folder in a quiet footer.</p></div>
+        <div class="card"><h3>Tools folded into lines</h3><p>Each command the agent runs is one line: <code>⠋ Running</code> while it runs, <code>✓</code> or <code>✗</code> when done, its output summed up below.</p></div>
+        <div class="card"><h3>Approvals as a menu</h3><p>When the agent wants to reach outside its workspace, the answers are listed: pick one with the arrows, Enter, a click, <code>y</code> or <code>n</code>.</p></div>
+        <div class="card"><h3>Thinking that folds</h3><p>The model's reasoning stays folded; a click or <code>ctrl+t</code> opens and closes it. <code>esc</code> interrupts an answer at any time.</p></div>
+        <div class="card"><h3>Multi-line messages</h3><p><code>ctrl+j</code> breaks the line, as in Claude Code and OpenCode; Enter sends.</p></div>
+        <div class="card"><h3>Copy, paste and images</h3><p>A drag selects the conversation alone and copies it on release; <code>ctrl+v</code> attaches the clipboard's image; <code>/copy</code> copies the last answer.</p></div>
+        <div class="card"><h3>Any model</h3><p><code>/models</code> sets up providers: an API key, or a server of your own, local or remote.</p></div>
+        <div class="card"><h3>Your terminal's theme</h3><p>Colors are derived from your terminal's background, light or dark, rather than fixed values.</p></div>
+      </div>
+    </section>
+
+    <section id="keys">
+      <h2>Keys</h2>
+      <table class="keys">
+        <tr><td><code>enter</code></td><td>send the message</td></tr>
+        <tr><td><code>ctrl + j</code></td><td>new line in the message (<code>alt + enter</code> too)</td></tr>
+        <tr><td><code>ctrl + ↑ / ↓</code></td><td>messages sent before</td></tr>
+        <tr><td>wheel, <code>↑ / ↓</code>, <code>page up/down</code></td><td>scroll the conversation</td></tr>
+        <tr><td>drag</td><td>select in the conversation, copied on release</td></tr>
+        <tr><td><code>ctrl + v</code></td><td>attach the image on the clipboard</td></tr>
+        <tr><td><code>ctrl + t</code></td><td>open or fold the thinking</td></tr>
+        <tr><td><code>esc</code></td><td>interrupt the answer; back to the latest</td></tr>
+        <tr><td><code>/help</code></td><td>every key and command</td></tr>
+        <tr><td><code>ctrl + c</code></td><td>quit</td></tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>What the installer does</h2>
+      <ol class="steps">
+        <li>Uses the Node.js 20+ you already have; if there is none, downloads the official build into <code>~/.local/share/dsh-tui/node</code>, checked against its SHA-256 sum.</li>
+        <li>Installs the DeepSeek Harness (<code>dsh</code>), at the version dsh-tui is tested on, into <code>~/.local</code>.</li>
+        <li>Downloads dsh-tui from this repository and wires the harness's <code>tui</code> profile to it.</li>
+        <li>Puts the <code>dsh-tui</code> command in <code>~/.local/bin</code>.</li>
+      </ol>
+      <p>To update, run the same command again. Your settings, sessions and keys in <code>~/.dsh</code> are left alone. The installer's code is <a href="https://github.com/auth-com-br/dsh-tui/blob/main/docs/install.sh"><code>docs/install.sh</code></a> — read it before you run it, if you like.</p>
+      <p class="small">To remove it: <code>rm -rf ~/.local/share/dsh-tui ~/.local/bin/dsh-tui</code> and <code>npm uninstall -g --prefix ~/.local @deepseek-ai/dsh</code>.</p>
+    </section>
+
+    <footer>
+      Maintained by <a href="https://auth.com.br">Auth Tecnologia</a> · Code at <a href="https://github.com/auth-com-br/dsh-tui">github.com/auth-com-br/dsh-tui</a> · MIT license.
+      Based on gxinxing's <a href="https://github.com/gxinxing/deepseek-harness-tui">deepseek-harness-tui</a>. Not an official DeepSeek product.
+    </footer>
+  </div>
+  <script>
+    document.querySelectorAll('button.copy').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var text = document.getElementById(b.dataset.copy).textContent;
+        var label = b.textContent;
+        var done = function () {
+          b.textContent = b.dataset.done;
+          setTimeout(function () { b.textContent = label; }, 1500);
+        };
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(text).then(done, function () {});
+        }
+      });
+    });
+  </script>
+</body>
+</html>

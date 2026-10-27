@@ -19,6 +19,20 @@ Give it a TokenDance key and a `dsh` install; run `dsh --profile tui` and you ge
 
 ## Install
 
+On Linux or macOS, one line — no sudo, everything in your home folder:
+
+```bash
+curl -fsSL https://auth-com-br.github.io/dsh-tui/install.sh | sh
+```
+
+It uses your Node.js 20+ (or puts the official one in `~/.local/share/dsh-tui`), installs the
+harness at the version this TUI is tested on, wires its `tui` profile to this TUI, and adds the
+`dsh-tui` command to `~/.local/bin`. Run it again to update. Then `dsh-tui`, and `/models` to
+choose a model. The page: https://auth-com-br.github.io/dsh-tui/ — the installer:
+[`docs/install.sh`](docs/install.sh).
+
+### By hand
+
 Requires **Node.js ≥ 20** and the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) CLI:
 
 ```bash
