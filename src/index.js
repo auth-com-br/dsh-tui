@@ -31,6 +31,7 @@ import { agentRows } from './agents.js';
 import { keyRefFor } from './models.js';
 import { inventory } from './plugins.js';
 import { mediaTypeOf } from './attachments.js';
+import { reassertRawMode, lineFeedIsEnter } from './terminal.js';
 import { readFile } from 'node:fs/promises';
 import { resolve as resolvePath, basename } from 'node:path';
 import { configuredServers, toolsByServer, mcpText } from './mcp.js';
@@ -655,18 +656,8 @@ async function run(ctx, exit) {
             process.stdout.write(on ? MOUSE_ON : MOUSE_OFF);
           }
         },
-        reassertRawMode: () => {
-          const stdin = process.stdin;
-          if (!stdin.isTTY || typeof stdin.setRawMode !== 'function' || !stdin.isRaw) {
-            return;
-          }
-          try {
-            stdin.setRawMode(false);
-            stdin.setRawMode(true);
-          } catch {
-            // The terminal has gone; there is nothing to set.
-          }
-        },
+        reassertRawMode,
+        lineFeedIsEnter,
         // The side panel's context window: the selected model's.
         contextWindow: async () => {
           const now = selected.current;

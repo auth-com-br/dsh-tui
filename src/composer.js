@@ -33,17 +33,23 @@ const parts = text => clusters(text).map(c => c.s);
  * @param {Line} line
  * @param {string} input
  * @param {{return?: boolean, backspace?: boolean, delete?: boolean, leftArrow?: boolean, rightArrow?: boolean, upArrow?: boolean, downArrow?: boolean, tab?: boolean, escape?: boolean, ctrl?: boolean, meta?: boolean, home?: boolean, end?: boolean}} key
+ * @param {{lineFeedIsEnter?: () => boolean}} [options]
  * @returns {{line: Line, submit?: string}}
  */
-export function editKey(line, input, key) {
+export function editKey(line, input, key, { lineFeedIsEnter } = {}) {
   const p = parts(line.text);
   const at = Math.min(line.cursor, p.length);
   const make = (list, cursor) => ({ line: { text: list.join(''), cursor } });
-  // A line feed alone is Enter too: a program the agent started can turn
-  // the terminal's icrnl on, and then Enter arrives as \n — Ink's "enter",
-  // not its "return" — and nothing could be sent.
-  // Alt+Enter is a new line in the message; Enter sends it.
+  // Alt+Enter and ctrl+J are a new line in the message, as in Claude Code
+  // and OpenCode; Enter sends it. Ctrl+J arrives as a lone line feed, which
+  // is also what Enter becomes when a program the agent started turned the
+  // terminal's icrnl on: lineFeedIsEnter asks the terminal which one it was
+  // (and sets raw mode again when it was Enter), so neither is lost; with
+  // nobody to ask, a line feed stays Enter.
   if (key.return && key.meta) {
+    return make([...p.slice(0, at), '\n', ...p.slice(at)], at + 1);
+  }
+  if (input === '\n' && !key.return && lineFeedIsEnter !== undefined && !lineFeedIsEnter()) {
     return make([...p.slice(0, at), '\n', ...p.slice(at)], at + 1);
   }
   if (key.return || input === '\n') {
@@ -249,8 +255,9 @@ export function layoutComposer(line, width) {
  * that changes — rarely, so the App is not re-rendered by typing.
  * `history` gives the messages sent, oldest first, and `arrowsTaken` says
  * when ↑/↓ are someone else's (the `/` menu's); `onPaste` may take a paste
- * (true) before it is typed.
- * @param {{onChange: (text: string) => void, onSubmit: (text: string) => void, placeholder?: string, initial?: string, width?: number, onHeight?: (lines: number) => void, history?: () => readonly string[], arrowsTaken?: () => boolean, onPaste?: (text: string) => boolean}} props
+ * (true) before it is typed. `lineFeedIsEnter` says whether a lone line feed
+ * was Enter (icrnl on) rather than ctrl+J.
+ * @param {{onChange: (text: string) => void, onSubmit: (text: string) => void, placeholder?: string, initial?: string, width?: number, onHeight?: (lines: number) => void, history?: () => readonly string[], arrowsTaken?: () => boolean, onPaste?: (text: string) => boolean, lineFeedIsEnter?: () => boolean}} props
  */
 export const Composer = React.forwardRef(function Composer(
   {
@@ -263,6 +270,7 @@ export const Composer = React.forwardRef(function Composer(
     history,
     arrowsTaken,
     onPaste,
+    lineFeedIsEnter,
   },
   ref,
 ) {
@@ -335,7 +343,7 @@ export const Composer = React.forwardRef(function Composer(
       setShown(true);
       return;
     }
-    const { line: next, submit } = editKey(current.current, input, key);
+    const { line: next, submit } = editKey(current.current, input, key, { lineFeedIsEnter });
     if (next !== current.current && next.text !== current.current.text) {
       // An edit leaves the history where it is: the line is the person's.
       hist.current.index = -1;

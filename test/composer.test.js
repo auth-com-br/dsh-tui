@@ -79,6 +79,28 @@ test('the character under the cursor is drawn apart, a space at the end', () => 
 
 test('Enter arriving as a line feed (icrnl turned on by a child) still sends', () => {
   assert.equal(editKey({ text: 'hi', cursor: 2 }, '\n', {}).submit, 'hi');
+  assert.equal(
+    editKey({ text: 'hi', cursor: 2 }, '\n', {}, { lineFeedIsEnter: () => true }).submit,
+    'hi',
+  );
+});
+
+test('ctrl+J (a line feed while icrnl is off) breaks the line instead of sending', () => {
+  const r = editKey({ text: 'ab', cursor: 1 }, '\n', {}, { lineFeedIsEnter: () => false });
+  assert.equal(r.submit, undefined);
+  assert.deepEqual(r.line, { text: 'a\nb', cursor: 2 });
+});
+
+test('Enter as a carriage return sends without asking the terminal', () => {
+  let asked = false;
+  const r = editKey(
+    { text: 'hi', cursor: 2 },
+    '\r',
+    { return: true },
+    { lineFeedIsEnter: () => (asked = true) },
+  );
+  assert.equal(r.submit, 'hi');
+  assert.equal(asked, false);
 });
 
 test('the composer wraps at its width and at its line breaks, the cursor in its row', () => {
