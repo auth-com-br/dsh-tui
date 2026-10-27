@@ -819,44 +819,105 @@ function TodoPanel({ todos }) {
 
 // ── Approvals ─────────────────────────────────────────────────────────────
 
+/** The answers an approval offers, in the order its menu lists them. */
+export const APPROVAL_CHOICES = [
+  { label: 'Allow once', key: 'y', outcome: 'allowed-once' },
+  { label: 'Reject', key: 'n', outcome: 'rejected' },
+];
+
+/**
+ * A key typed just as an approval appeared was meant for something else —
+ * the Enter that sent a message, say. Enter and the digits wait this long
+ * before they answer, so nothing is allowed by a key aimed elsewhere.
+ */
+export const APPROVAL_SETTLE_MS = 500;
+
 /**
  * The lines an approval prompt shows in place of the composer: what is
  * asked, the action itself (the tool call's arguments, already streamed
- * into its cell), why, and the keys. The first line carries the words
- * "approval needed", which tend reads to show the harness as waiting.
+ * into its cell), why, the answers as a menu with the cursor on one, and
+ * the keys. The first line carries the words "approval needed", which tend
+ * reads to show the harness as waiting.
  * @param {{toolName: string, args?: string, reason?: string}} req
  * @param {number} width
- * @returns {string[]}
+ * @param {number} [cursor] the answer the cursor is on
+ * @returns {Array<{text: string, style: 'title' | 'detail' | 'reason' | 'row' | 'selected' | 'keys', choice?: number}>}
  */
-export function approvalLines(req, width) {
+export function approvalLines(req, width, cursor = 0) {
   const w = Math.max(20, width - 4);
-  const lines = [`▲ approval needed · ${req.toolName}`];
+  const lines = [{ text: truncate(`▲ approval needed · ${req.toolName}`, w), style: 'title' }];
   if (req.args) {
-    lines.push(`  ${truncate(req.args.replace(/\s+/g, ' '), w - 2)}`);
+    lines.push({ text: `  ${truncate(req.args.replace(/\s+/g, ' '), w - 2)}`, style: 'detail' });
   }
   if (req.reason) {
-    lines.push(`  ${truncate(req.reason.replace(/\s+/g, ' '), w - 2)}`);
+    lines.push({ text: `  ${truncate(req.reason.replace(/\s+/g, ' '), w - 2)}`, style: 'reason' });
   }
-  lines.push('  y allow once · n reject · esc reject');
+  APPROVAL_CHOICES.forEach((c, i) => {
+    const here = i === cursor;
+    lines.push({
+      text: truncate(`  ${here ? '›' : ' '} ${i + 1}. ${c.label}  (${c.key})`, w),
+      style: here ? 'selected' : 'row',
+      choice: i,
+    });
+  });
+  lines.push({
+    text: truncate('  ↑↓ · enter or click · y allow · n/esc reject', w),
+    style: 'keys',
+  });
   return lines;
 }
 
 /**
- * The outcome a key gives a pending approval, or null for a key that does
- * not answer it: y allows this one action, n and esc reject it. Nothing is
- * allowed by a key that was meant for something else, so only y allows.
+ * What a key does to a pending approval: moves the cursor among the answers,
+ * or answers it. y allows this one action and n and esc reject it, at once;
+ * Enter takes the answer under the cursor and a digit the answer it numbers,
+ * once the prompt has settled (APPROVAL_SETTLE_MS). Any other key does
+ * nothing, so nothing is allowed by a key that was meant for something else.
+ * @param {number} cursor
  * @param {string} input
- * @param {{escape?: boolean}} key
- * @returns {'allowed-once' | 'rejected' | null}
+ * @param {{escape?: boolean, return?: boolean, upArrow?: boolean, downArrow?: boolean}} key
+ * @param {boolean} [settled] the prompt has been up long enough for Enter and digits
+ * @returns {{cursor: number, outcome?: 'allowed-once' | 'rejected'}}
  */
-export function approvalOutcome(input, key) {
+export function approvalKey(cursor, input, key, settled = true) {
+  const n = APPROVAL_CHOICES.length;
   if (input === 'y' || input === 'Y') {
-    return 'allowed-once';
+    return { cursor, outcome: 'allowed-once' };
   }
   if (input === 'n' || input === 'N' || key.escape) {
-    return 'rejected';
+    return { cursor, outcome: 'rejected' };
   }
-  return null;
+  if (key.upArrow) {
+    return { cursor: (cursor - 1 + n) % n };
+  }
+  if (key.downArrow || key.tab) {
+    return { cursor: (cursor + 1) % n };
+  }
+  if (!settled) {
+    return { cursor };
+  }
+  if (key.return) {
+    return { cursor, outcome: APPROVAL_CHOICES[cursor].outcome };
+  }
+  const digit = Number(input);
+  if (input.length === 1 && digit >= 1 && digit <= n) {
+    return { cursor: digit - 1, outcome: APPROVAL_CHOICES[digit - 1].outcome };
+  }
+  return { cursor };
+}
+
+/**
+ * The answer a click gives a pending approval: the screen row (1-based, as
+ * the mouse reports it) of each answer, with the prompt's lines ending on
+ * the row above the footer, the terminal's last.
+ * @param {ReturnType<typeof approvalLines>} lines
+ * @param {number} rows the terminal's rows
+ * @param {number} row the row clicked
+ * @returns {number | undefined} the answer clicked, if any
+ */
+export function approvalChoiceAtRow(lines, rows, row) {
+  const line = lines[row - (rows - lines.length)];
+  return line?.choice;
 }
 
 // ── App ───────────────────────────────────────────────────────────────────
@@ -983,6 +1044,14 @@ export function App({
   // Approval requests waiting for the user, oldest first: the first is the
   // one shown. Each carries the resolve of the harness's waiting request.
   const [approvals, setApprovals] = useState([]);
+  // The answer the approval menu's cursor is on, and when the approval at
+  // the head of the queue appeared (Enter and digits wait for it to settle).
+  const [approvalCursor, setApprovalCursor] = useState(0);
+  const approvalShownAt = useRef(0);
+  const approvalHead = approvals[0];
+  useEffect(() => {
+    approvalShownAt.current = Date.now();
+  }, [approvalHead]);
   // The model shown in the footer, which /model changes.
   const [modelLabel, setModelLabel] = useState(model);
   // Set while a resumed session's past is replayed onto the screen.
@@ -1127,6 +1196,7 @@ export function App({
    * @param {'allowed-once' | 'rejected' | 'cancelled'} outcome
    */
   const answerApproval = useCallback(outcome => {
+    setApprovalCursor(0);
     setApprovals(prev => {
       if (prev.length === 0) {
         return prev;
@@ -1294,8 +1364,8 @@ export function App({
 
   // Global keys: esc interrupts the live turn, ctrl + t toggles thinking,
   // ctrl + c quits. Bare letters never hijack typing — except while an
-  // approval is asked, when the composer is not there to type into and y,
-  // n and esc answer it.
+  // approval is asked, when the composer is not there to type into and its
+  // menu takes the keys (approvalKey).
   useInput((input, key) => {
     // The mouse, as SGR reports (index.js asks for them): Ink names none of
     // it, and hands the sequences over as the input (mouse.js).
@@ -1330,6 +1400,15 @@ export function App({
         } else if (mouse.release) {
           const from = dragFrom.current;
           dragFrom.current = null;
+          // A click on one of a pending approval's answers gives it.
+          if (approvals.length > 0 && from && !from.moved) {
+            const lines = approvalLines(approvals[0], width, approvalCursor);
+            const choice = approvalChoiceAtRow(lines, rows, mouse.row);
+            if (choice !== undefined) {
+              answerApproval(APPROVAL_CHOICES[choice].outcome);
+              continue;
+            }
+          }
           if (from && !from.moved) {
             // A click, not a drag: on a thought, it opens or folds it.
             const hit = thoughtAtRow({ ...shown, row: mouse.row });
@@ -1373,9 +1452,12 @@ export function App({
       return;
     }
     if (approvals.length > 0 && !(key.ctrl && input === 'c')) {
-      const outcome = approvalOutcome(input, key);
-      if (outcome !== null) {
-        answerApproval(outcome);
+      const settled = Date.now() - approvalShownAt.current >= APPROVAL_SETTLE_MS;
+      const next = approvalKey(approvalCursor, input, key, settled);
+      if (next.outcome !== undefined) {
+        answerApproval(next.outcome);
+      } else if (next.cursor !== approvalCursor) {
+        setApprovalCursor(next.cursor);
       }
       return;
     }
@@ -2410,7 +2492,7 @@ export function App({
   const menuShown = menuLines(menu, cursor, width);
   const composerExtra =
     approvals.length > 0
-      ? approvalLines(approvals[0], width).length - 1
+      ? approvalLines(approvals[0], width, approvalCursor).length - 1
       : asks.length > 0
         ? questionLines(asks[0].state, width).length - 1
         : menuShown.length;
@@ -2623,6 +2705,14 @@ export function App({
       )
     : null;
 
+  const approvalStyle = {
+    title: { bold: true, color: 'yellow' },
+    detail: { dimColor: true },
+    reason: {},
+    row: {},
+    selected: { bold: true, inverse: true, color: 'yellow' },
+    keys: { dimColor: true },
+  };
   const questionStyle = {
     title: { bold: true, color: 'cyan' },
     row: {},
@@ -2654,12 +2744,8 @@ export function App({
           ? el(
               Box,
               { paddingLeft: 1, paddingRight: 1, flexDirection: 'column' },
-              ...approvalLines(approvals[0], width).map((line, i) =>
-                el(
-                  Text,
-                  i === 0 ? { key: i, bold: true, color: 'yellow' } : { key: i, dimColor: i > 0 },
-                  line,
-                ),
+              ...approvalLines(approvals[0], width, approvalCursor).map((line, i) =>
+                el(Text, { key: i, ...approvalStyle[line.style] }, line.text),
               ),
             )
           : el(
