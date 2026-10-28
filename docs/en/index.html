@@ -32,7 +32,7 @@
           <button class="copy" type="button" data-copy="cmd" data-done="copied">copy</button>
         </div>
       </div>
-      <p class="small">Then open it with <code>dsh-tui</code> and choose a model with <code>/models</code>. No <code>sudo</code>: everything goes into your home folder.</p>
+      <p class="small">Then type <code>dsh</code> — no <code>--profile</code> — and choose a model with <code>/models</code>. No <code>sudo</code>: everything goes into your home folder.</p>
     </div>
 
     <div class="term" aria-label="dsh-tui asking for approval to edit a file">
@@ -87,12 +87,12 @@
       <h2>What the installer does</h2>
       <ol class="steps">
         <li>Uses the Node.js 20+ you already have; if there is none, downloads the official build into <code>~/.local/share/dsh-tui/node</code>, checked against its SHA-256 sum.</li>
-        <li>Installs the DeepSeek Harness (<code>dsh</code>), at the version dsh-tui is tested on, into <code>~/.local</code>.</li>
+        <li>Installs the DeepSeek Harness with it, at the version dsh-tui is tested on (the harness's 0.2 series changed its API and does not run it yet), into <code>~/.local/share/dsh-tui/harness</code>.</li>
         <li>Downloads dsh-tui from this repository and wires the harness's <code>tui</code> profile to it.</li>
-        <li>Puts the <code>dsh-tui</code> command in <code>~/.local/bin</code>.</li>
+        <li>Puts in <code>~/.local/bin</code> a <code>dsh</code> command that opens dsh-tui with no <code>--profile</code> (the harness's own commands, such as <code>dsh web</code> and <code>dsh plugin</code>, still work), and <code>dsh-tui</code>, which always opens it. A <code>dsh</code> of your own already there is left alone.</li>
       </ol>
       <p>To update, run the same command again. Your settings, sessions and keys in <code>~/.dsh</code> are left alone. The installer's code is <a href="https://github.com/auth-com-br/dsh-tui/blob/main/docs/install.sh"><code>docs/install.sh</code></a> — read it before you run it, if you like.</p>
-      <p class="small">To remove it: <code>rm -rf ~/.local/share/dsh-tui ~/.local/bin/dsh-tui</code> and <code>npm uninstall -g --prefix ~/.local @deepseek-ai/dsh</code>.</p>
+      <p class="small">To remove it: <code>rm -rf ~/.local/share/dsh-tui ~/.local/bin/dsh ~/.local/bin/dsh-tui</code>. Your sessions and settings stay in <code>~/.dsh</code>.</p>
     </section>
 
     <footer>

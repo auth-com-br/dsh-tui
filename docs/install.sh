@@ -6,13 +6,18 @@
 #
 # 1. Node.js 20 or newer: the one on PATH, or else the official build put in
 #    ~/.local/share/dsh-tui/node (checked against nodejs.org's SHASUMS256).
-# 2. The DeepSeek Harness CLI, `dsh`, at the version this TUI is tested on,
-#    into ~/.local (npm's --prefix, so no global npm folder is written).
+# 2. The DeepSeek Harness CLI at the version this TUI is tested on, and pnpm
+#    (which the harness manages plugins with) when there is none, into
+#    ~/.local/share/dsh-tui/harness (npm's --prefix: no global npm folder is
+#    written).
 # 3. This TUI, from GitHub, into ~/.local/share/dsh-tui/app, with its
 #    dependencies.
-# 4. The harness's `tui` profile wired to it (`dsh plugin --profile tui add`;
-#    pnpm, which the harness manages plugins with, is installed if missing).
-# 5. `dsh-tui`, the command that opens it, in ~/.local/bin.
+# 4. The harness's `tui` profile wired to it (`dsh plugin --profile tui add`).
+# 5. Two commands in ~/.local/bin: `dsh`, which opens this TUI when it is
+#    given no profile — `dsh`, `dsh --resume <id>` — and passes the harness's
+#    own commands through (`dsh web`, `dsh plugin …`, `dsh --profile …`,
+#    `--version`, `--help`); and `dsh-tui`, which always opens it. A `dsh` of
+#    the user's own in ~/.local/bin is left alone.
 #
 # Run again to update. Settings, sessions and keys in ~/.dsh are left alone.
 # The model's key is set inside the TUI, with /models.
@@ -28,7 +33,9 @@ PREFIX="${DSH_TUI_PREFIX:-$HOME/.local}"
 REPO="${DSH_TUI_REPO:-auth-com-br/dsh-tui}"
 REF="${DSH_TUI_REF:-main}"
 # The harness this TUI is built and tested against: its packages are on
-# ^0.1.0-rc, which the 0.2 series does not satisfy.
+# ^0.1.0-rc, which the 0.2 series does not satisfy — under 0.2.1-rc.2 the TUI
+# fails to load ("@deepseek-ai/dsh-llm does not provide an export named
+# CallId"). Moving up means porting the TUI to the new API first.
 DSH_VERSION="${DSH_VERSION:-0.1.2-rc.1}"
 NODE_VERSION="${NODE_VERSION:-v22.22.2}"
 NODE_MAJOR_MIN=20
@@ -36,7 +43,11 @@ NODE_MAJOR_MIN=20
 HOME_DIR="$PREFIX/share/dsh-tui"
 APP_DIR="$HOME_DIR/app"
 NODE_DIR="$HOME_DIR/node"
+HARNESS_DIR="$HOME_DIR/harness"
 BIN_DIR="$PREFIX/bin"
+# The line that marks the commands this installer writes, so that a run
+# later replaces them and never a command of the user's own.
+MARK="written by deepseek-harness-tui's install.sh"
 
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
@@ -116,20 +127,20 @@ export NPM_CONFIG_UPDATE_NOTIFIER
 
 # ── 2. The harness, dsh ──────────────────────────────────────────────────────
 
-mkdir -p "$BIN_DIR"
-PATH="$BIN_DIR:$PATH"
-have=$("$BIN_DIR/dsh" --version 2>/dev/null || true)
+mkdir -p "$HARNESS_DIR" "$BIN_DIR"
+PATH="$HARNESS_DIR/bin:$PATH"
+have=$("$HARNESS_DIR/bin/dsh" --version 2>/dev/null || true)
 if [ "$have" = "$DSH_VERSION" ]; then
   say "DeepSeek Harness $DSH_VERSION (already installed)"
 else
-  say "installing the DeepSeek Harness $DSH_VERSION into $PREFIX"
-  npm install -g --prefix "$PREFIX" --no-audit --no-fund --loglevel=error "@deepseek-ai/dsh@$DSH_VERSION" >/dev/null
+  say "installing the DeepSeek Harness $DSH_VERSION into $HARNESS_DIR"
+  npm install -g --prefix "$HARNESS_DIR" --no-audit --no-fund --loglevel=error "@deepseek-ai/dsh@$DSH_VERSION" >/dev/null
 fi
 
 # The harness manages a profile's plugins with pnpm.
 if ! command -v pnpm >/dev/null 2>&1; then
-  say "installing pnpm into $PREFIX (the harness manages its plugins with it)"
-  npm install -g --prefix "$PREFIX" --no-audit --no-fund --loglevel=error pnpm@10 >/dev/null
+  say "installing pnpm into $HARNESS_DIR (the harness manages its plugins with it)"
+  npm install -g --prefix "$HARNESS_DIR" --no-audit --no-fund --loglevel=error pnpm@10 >/dev/null
 fi
 
 # ── 3. This TUI ──────────────────────────────────────────────────────────────
@@ -174,17 +185,51 @@ pkg.dsh.profile.patchReload = "startup";
 fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");
 ' "$HOME/.dsh/profiles/tui/package.json"
 
-# ── 5. The command ───────────────────────────────────────────────────────────
+# ── 5. The commands ──────────────────────────────────────────────────────────
 
 cat >"$BIN_DIR/dsh-tui" <<EOF
 #!/bin/sh
-# Opens deepseek-harness-tui (installed by its install.sh; run that again to
-# update). The Node.js it was installed with comes first on PATH.
-PATH="$NODE_DIR/bin:$BIN_DIR:\$PATH"
+# $MARK.
+# Opens deepseek-harness-tui; run the installer again to update it.
+PATH="$NODE_DIR/bin:$HARNESS_DIR/bin:\$PATH"
 export PATH
-exec dsh --profile tui "\$@"
+exec "$HARNESS_DIR/bin/dsh" --profile tui "\$@"
 EOF
 chmod 755 "$BIN_DIR/dsh-tui"
+
+# ours: no command there yet, a command this installer wrote, or the npm link
+# an earlier version of it left (the harness went straight into ~/.local).
+ours() {
+  [ -e "$1" ] || [ -L "$1" ] || return 0
+  grep -q "$MARK" "$1" 2>/dev/null && return 0
+  case "$(readlink "$1" 2>/dev/null)" in
+    *lib/node_modules/@deepseek-ai/dsh/*) return 0 ;;
+  esac
+  return 1
+}
+
+DSH_WRAPPED=no
+if ours "$BIN_DIR/dsh"; then
+  rm -f "$BIN_DIR/dsh"
+  cat >"$BIN_DIR/dsh" <<EOF
+#!/bin/sh
+# $MARK.
+# The DeepSeek Harness, opening deepseek-harness-tui when no profile is given:
+# the harness itself wants --profile on every run. Its own commands and flags
+# pass through as they are.
+PATH="$NODE_DIR/bin:$HARNESS_DIR/bin:\$PATH"
+export PATH
+case "\${1-}" in
+  web | plugin | --profile | --profile=* | --patch | --patch=* | --dump-config | --dump-default-config | -V | --version | -h | --help)
+    exec "$HARNESS_DIR/bin/dsh" "\$@" ;;
+esac
+exec "$HARNESS_DIR/bin/dsh" --profile tui "\$@"
+EOF
+  chmod 755 "$BIN_DIR/dsh"
+  DSH_WRAPPED=yes
+else
+  warn "$BIN_DIR/dsh is a command of your own and was left alone: open the TUI with dsh-tui"
+fi
 
 say "done: deepseek-harness-tui is installed"
 echo
@@ -196,6 +241,16 @@ case ":$USER_PATH:" in
     echo
     ;;
 esac
-echo "  Open it:            dsh-tui"
+if [ "$DSH_WRAPPED" = yes ]; then
+  # Another dsh earlier on PATH (a global npm install) would be the one that
+  # runs.
+  found=$(PATH="$USER_PATH" command -v dsh 2>/dev/null || true)
+  if [ -n "$found" ] && [ "$found" != "$BIN_DIR/dsh" ]; then
+    warn "'dsh' on your PATH is $found, not $BIN_DIR/dsh: dsh-tui opens the TUI either way"
+  fi
+  echo "  Open it:            dsh   (or dsh-tui)"
+else
+  echo "  Open it:            dsh-tui"
+fi
 echo "  Choose a model:     /models inside it (an API key, or a local server)"
 echo "  Update it later:    run this installer again"

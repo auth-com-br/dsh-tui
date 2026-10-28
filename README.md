@@ -26,9 +26,11 @@ curl -fsSL https://auth-com-br.github.io/dsh-tui/install.sh | sh
 ```
 
 It uses your Node.js 20+ (or puts the official one in `~/.local/share/dsh-tui`), installs the
-harness at the version this TUI is tested on, wires its `tui` profile to this TUI, and adds the
-`dsh-tui` command to `~/.local/bin`. Run it again to update. Then `dsh-tui`, and `/models` to
-choose a model. The page: https://auth-com-br.github.io/dsh-tui/ — the installer:
+harness with it at the version this TUI is tested on (the harness's 0.2 series changed its API and
+does not run it yet), wires its `tui` profile to this TUI, and adds two commands to `~/.local/bin`:
+`dsh`, which opens the TUI with no `--profile` (the harness's own `dsh web`, `dsh plugin …` and
+`dsh --profile …` pass through), and `dsh-tui`. Run it again to update. Then `dsh`, and `/models`
+to choose a model. The page: https://auth-com-br.github.io/dsh-tui/ — the installer:
 [`docs/install.sh`](docs/install.sh).
 
 ### By hand
